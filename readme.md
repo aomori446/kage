@@ -77,6 +77,14 @@ The `config.Config` struct allows you to customize the behavior:
 go test ./...
 ```
 
+## TODO
+
+- [ ] Implement server side
+- [ ] Add plugin support (SIPs)
+- [ ] Support multiple servers (Load Balancing / Failover)
+- [ ] Add ACL / Routing support
+- [ ] Improve test coverage
+
 ## License
 
 [MIT License](LICENSE)
