@@ -13,25 +13,19 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	
+
 	"github.com/aomori446/kage/config"
 	"github.com/aomori446/kage/handler"
 )
 
-const (
-	MaxUDPPacketLen = 1500
-	SessionTimeout  = 4 * time.Minute
-	CleanupInterval = time.Minute
-)
-
 type Relayer struct {
 	sessionMap sync.Map // map[clientAddr string]*Session
-	
+
 	ln          net.PacketConn
 	blockCipher cipher.Block
-	
+
 	ph handler.UDPPacketHandler
-	
+
 	key        []byte
 	method     config.CipherMethod
 	logger     *slog.Logger
@@ -51,16 +45,16 @@ func NewRelayer(
 	if err != nil {
 		return nil, err
 	}
-	
+
 	blockCipher, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(os.Stdout, nil))
 	}
-	
+
 	return &Relayer{
 		key:        key,
 		method:     method,
@@ -68,7 +62,7 @@ func NewRelayer(
 		listenAddr: listenAddr,
 		serverAddr: serverAddr,
 		ph:         ph,
-		
+
 		ln:          ln,
 		blockCipher: blockCipher,
 	}, nil
@@ -80,12 +74,12 @@ func (r *Relayer) Relay(ctx context.Context) error {
 		<-ctx.Done()
 		_ = r.Close()
 	}()
-	
+
 	go r.monitorSessions(ctx)
-	
+
 	r.logger = r.logger.With("listenAddr", r.listenAddr.String(), "serverAddr", r.serverAddr.String())
 	r.logger.Debug("UDP relayer started")
-	
+
 	buf := make([]byte, MaxUDPPacketLen)
 	for {
 		n, clientAddr, err := r.ln.ReadFrom(buf)
@@ -93,21 +87,21 @@ func (r *Relayer) Relay(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			
+
 			if errors.Is(err, net.ErrClosed) {
 				return nil
 			}
-			
+
 			r.logger.Warn("read from client failed", "err", err)
 			continue
 		}
-		
+
 		s, err := r.loadOrStoreSession(clientAddr)
 		if err != nil {
 			r.logger.Error("load session failed", "err", err, "clientAddr", clientAddr.String())
 			continue
 		}
-		
+
 		if err = s.wrapAndWrite(buf[:n]); err != nil {
 			r.logger.Warn("write to server failed", "err", err, "clientAddr", clientAddr.String())
 			_ = s.Close()
@@ -119,7 +113,7 @@ func (r *Relayer) Relay(ctx context.Context) error {
 func (r *Relayer) monitorSessions(ctx context.Context) {
 	ticker := time.NewTicker(CleanupInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -127,11 +121,11 @@ func (r *Relayer) monitorSessions(ctx context.Context) {
 		case <-ticker.C:
 			now := time.Now().Unix()
 			timeout := int64(SessionTimeout.Seconds())
-			
+
 			r.sessionMap.Range(func(key, value interface{}) bool {
 				s := value.(*Session)
 				lastActive := atomic.LoadInt64(&s.lastActive)
-				
+
 				if now-lastActive > timeout {
 					r.logger.Debug("close session due to timeout", "clientAddr", key)
 					_ = s.Close()
@@ -148,7 +142,7 @@ func (r *Relayer) loadOrStoreSession(clientAddr net.Addr) (*Session, error) {
 	if v, ok := r.sessionMap.Load(k); ok {
 		return v.(*Session), nil
 	}
-	
+
 	salt, err := NewSalt(8)
 	if err != nil {
 		return nil, err
@@ -161,12 +155,12 @@ func (r *Relayer) loadOrStoreSession(clientAddr net.Addr) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if v, ok := r.sessionMap.LoadOrStore(k, s); ok {
 		_ = s.Close()
 		return v.(*Session), nil
 	}
-	
+
 	return s, nil
 }
 
@@ -176,13 +170,13 @@ func (r *Relayer) Close() error {
 			return err
 		}
 	}
-	
+
 	r.sessionMap.Range(func(key, value interface{}) bool {
 		s := value.(*Session)
 		_ = s.Close()
 		return true
 	})
-	
+
 	return nil
 }
 
@@ -191,7 +185,7 @@ type Session struct {
 	clientAddr net.Addr
 	enCipher   *Cipher
 	deCipher   *Cipher
-	
+
 	serverConn *net.UDPConn
 	lastActive int64
 }
@@ -228,32 +222,32 @@ func (s *Session) relayFromServer() {
 		_ = s.Close()
 		s.r.sessionMap.Delete(s.clientAddr.String())
 	}()
-	
+
 	buf := make([]byte, MaxUDPPacketLen)
 	for {
 		n, err := s.serverConn.Read(buf)
 		if err != nil {
 			return
 		}
-		
+
 		decryptedSSPayload, err := unwrap(buf[:n], s.enCipher, s.deCipher, s.r.blockCipher)
 		if err != nil {
 			s.r.logger.Warn("unwrap data from server failed", "err", err)
 			return
 		}
-		
+
 		clientPacket, err := s.r.ph.HandleOutbound(decryptedSSPayload)
 		if err != nil {
 			s.r.logger.Warn("handle outbound packet failed", "err", err)
 			return
 		}
-		
+
 		_, err = s.r.ln.WriteTo(clientPacket, s.clientAddr)
 		if err != nil {
 			s.r.logger.Debug("write back to client failed", "err", err)
 			return
 		}
-		
+
 		s.updateActivity()
 	}
 }
@@ -263,17 +257,17 @@ func (s *Session) wrapAndWrite(packet []byte) error {
 	if err != nil {
 		return err
 	}
-	
+
 	wrappedData, err := wrap(ssPayload, s.enCipher, s.r.blockCipher)
 	if err != nil {
 		return err
 	}
-	
+
 	_, err = s.serverConn.Write(wrappedData)
 	if err != nil {
 		return err
 	}
-	
+
 	s.updateActivity()
 	return nil
 }
@@ -282,12 +276,12 @@ func wrap(data []byte, enCipher *Cipher, blockCipher cipher.Block) ([]byte, erro
 	separateHeader := buildSeparateHeader(enCipher)
 	encryptedSeparateHeader := make([]byte, 16)
 	blockCipher.Encrypt(encryptedSeparateHeader, separateHeader)
-	
+
 	msg, err := buildClientMessage(data)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	encryptedMsg := enCipher.SealWithNonce(nil, separateHeader[4:16], msg)
 	return append(encryptedSeparateHeader, encryptedMsg...), nil
 }
@@ -303,14 +297,14 @@ func buildClientMessage(payload []byte) ([]byte, error) {
 	header := make([]byte, 0, 100)
 	header = append(header, byte(HeaderTypeClientPacket))                     // Type
 	header = binary.BigEndian.AppendUint64(header, uint64(time.Now().Unix())) // Timestamp
-	
+
 	padding, err := Padding(1, 100)
 	if err != nil {
 		return nil, err
 	}
 	header = binary.BigEndian.AppendUint16(header, uint16(len(padding)))
 	header = append(header, padding...)
-	
+
 	message := append(header, payload...)
 	return message, nil
 }
@@ -319,7 +313,7 @@ func unwrap(data []byte, enCipher *Cipher, deCipher *Cipher, blockCipher cipher.
 	encryptedHeader := data[:16]
 	separateHeader := make([]byte, 16)
 	blockCipher.Decrypt(separateHeader, encryptedHeader)
-	
+
 	if deCipher == nil {
 		var err error
 		serverSessionID := separateHeader[:8]
@@ -328,13 +322,13 @@ func unwrap(data []byte, enCipher *Cipher, deCipher *Cipher, blockCipher cipher.
 			return nil, err
 		}
 	}
-	
+
 	nonce := separateHeader[4:16]
 	msg, err := deCipher.OpenWithNonce(nil, nonce, data[16:])
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return parseServerMessage(msg, enCipher)
 }
 
@@ -342,30 +336,30 @@ func parseServerMessage(data []byte, enCipher *Cipher) ([]byte, error) {
 	if len(data) < 19 {
 		return nil, errors.New("server message too short")
 	}
-	
+
 	if data[0] != byte(HeaderTypeServerPacket) {
-		return nil, errors.New("invalid message type")
+		return nil, ErrHeaderType
 	}
-	
+
 	timestamp := binary.BigEndian.Uint64(data[1:9])
 	ts := time.Unix(int64(timestamp), 0)
 	if time.Since(ts).Abs().Seconds() > 30 {
 		return nil, errors.New("timestamp skewed")
 	}
-	
+
 	clientSessionID := data[9:17]
 	if !bytes.Equal(clientSessionID, enCipher.Salt()) {
 		return nil, errors.New("client session ID mismatch")
 	}
-	
+
 	paddingLen := binary.BigEndian.Uint16(data[17:19])
 	if len(data) < 19+int(paddingLen) {
 		return nil, errors.New("invalid padding length")
 	}
-	
+
 	addrStart := 19 + int(paddingLen)
 	data = data[addrStart:]
-	
+
 	// [ATYP][ADDR][PORT][DATA]
 	return data, nil
 }

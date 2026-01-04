@@ -6,15 +6,15 @@ import (
 	"crypto/rand"
 	"errors"
 	"sync"
-	
+
 	"github.com/aomori446/kage/config"
 	"github.com/zeebo/blake3"
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
 var (
-	ErrCipherMethod  = errors.New("cipher: cipherMethod not supported")
-	ErrCipherKeySize = errors.New("cipher: invalid key size")
+	ErrCipherMethod  = errors.New("shadowsocks: cipherMethod not supported")
+	ErrCipherKeySize = errors.New("shadowsocks: invalid key size")
 )
 
 func NewCipher(key, salt []byte, method config.CipherMethod) (*Cipher, error) {
@@ -34,12 +34,12 @@ func NewAES128GCM(key, salt []byte) (*Cipher, error) {
 	if len(key) != 16 {
 		return nil, ErrCipherKeySize
 	}
-	
+
 	deriveKey, err := Blake3DeriveKey(key, salt)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	c, err := aes.NewCipher(deriveKey)
 	if err != nil {
 		return nil, err
@@ -61,12 +61,12 @@ func NewAES256GCM(key, salt []byte) (*Cipher, error) {
 	if len(key) != 32 {
 		return nil, ErrCipherKeySize
 	}
-	
+
 	deriveKey, err := Blake3DeriveKey(key, salt)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	c, err := aes.NewCipher(deriveKey)
 	if err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ type Counter struct {
 func (c *Counter) Count() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	for i := range c.buf {
 		if c.buf[i] == 255 {
 			c.buf[i] = 0
@@ -127,7 +127,7 @@ func (c *Counter) Count() {
 func (c *Counter) Nonce() []byte {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	nonce := make([]byte, 12)
 	copy(nonce, c.buf[:])
 	return nonce
@@ -144,7 +144,7 @@ func NewSalt(size int) ([]byte, error) {
 type Cipher struct {
 	aead    cipher.AEAD
 	counter *Counter
-	
+
 	key    []byte
 	salt   []byte
 	method config.CipherMethod

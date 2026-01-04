@@ -2,6 +2,7 @@ package shadowsocks
 
 import (
 	"errors"
+	"time"
 )
 
 var (
@@ -26,4 +27,10 @@ const (
 	MaxPaddingLength        = 900
 	MaxInitialPayloadLength = 8192
 	MaxPayloadLength        = 0xFFFF
+)
+
+const (
+	MaxUDPPacketLen = 1500
+	SessionTimeout  = 4 * time.Minute
+	CleanupInterval = time.Minute
 )

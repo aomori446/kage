@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"time"
 
 	"github.com/aomori446/kage/config"
 	"github.com/aomori446/kage/handler"
@@ -82,7 +83,7 @@ func handleConnection(ctx context.Context, conn net.Conn, logger *slog.Logger, c
 
 	var initialPayload []byte
 	if cfg.FastOpen {
-		payload, err := shadowsocks.WaitForInitialPayload(conn)
+		payload, err := shadowsocks.ReadInitialPayload(conn, 50*time.Millisecond)
 		if err != nil {
 			return err
 		}
@@ -99,12 +100,12 @@ func handleConnection(ctx context.Context, conn net.Conn, logger *slog.Logger, c
 		return err
 	}
 
-	stc, err := shadowsocks.NewShadowTCPConn(ctx, seAddr, key, cfg.CipherMethod, logger)
+	stc, err := shadowsocks.NewShadowTCPConn(seAddr, key, cfg.CipherMethod, logger)
 	if err != nil {
 		return err
 	}
 
-	stc.Stream(conn, targetAddr, initialPayload)
+	stc.Stream(ctx, conn, targetAddr, initialPayload)
 	return nil
 }
 
