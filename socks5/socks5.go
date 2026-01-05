@@ -1,11 +1,12 @@
 package socks5
 
 import (
-	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"slices"
+	"time"
 )
 
 const (
@@ -13,6 +14,8 @@ const (
 )
 
 var (
+	ErrHandshake = func(err error) error { return fmt.Errorf("handshake failed: %w", err) }
+
 	ErrVersionNotSupported = errors.New("socks5: version not supported")
 	ErrCommandNotSupported = errors.New("socks5: command not supported")
 	ErrMethodsCount        = errors.New("socks5: invalid methods count")
@@ -27,21 +30,8 @@ const (
 
 type Command byte
 
-func (c Command) String() string {
-	switch c {
-	case Connect:
-		return "connect"
-	case Bind:
-		return "bind"
-	case UDPAssociate:
-		return "udp_associate"
-	default:
-		return "unknow"
-	}
-}
-
-func (c Command) Valid(want Command, conn net.Conn) error {
-	if c != want {
+func (c Command) Validate(cmd Command, conn io.Writer) error {
+	if c != cmd {
 		resp := TCPResponse{
 			Filed: CommandNotSupported,
 			Addr: &Addr{
@@ -76,60 +66,76 @@ type TCPRequest struct {
 	Addr    *Addr
 }
 
-func TCPHandShake(ctx context.Context, rw io.ReadWriter) (*TCPRequest, error) {
+func TCPHandShake(conn net.Conn, timeout time.Duration) (req *TCPRequest, err error) {
+	defer func() {
+		if err != nil {
+			err = ErrHandshake(err)
+		}
+	}()
+
+	if err = conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return
+	}
+	defer conn.SetDeadline(time.Time{})
+
 	//+----+----------+----------+
 	//|VER | NMETHODS | METHODS  |
 	//+----+----------+----------+
 	//| 1  |    1     | 1 to 255 |
 	//+----+----------+----------+
 	buf := make([]byte, 255)
-	_, err := io.ReadFull(rw, buf[:2])
+	_, err = io.ReadFull(conn, buf[:2])
 	if err != nil {
 		return nil, err
 	}
-	
-	version := buf[0]
-	if version != Version {
+
+	v := buf[0]
+	if v != Version {
 		return nil, ErrVersionNotSupported
 	}
-	
+
 	nMethods := int(buf[1])
 	if nMethods < 1 {
 		return nil, ErrMethodsCount
 	}
-	
-	_, err = io.ReadFull(rw, buf[:nMethods])
+
+	_, err = io.ReadFull(conn, buf[:nMethods])
 	if err != nil {
 		return nil, err
 	}
-	
-	if !slices.Contains(buf, byte(NoAuthenticationRequired)) {
-		rw.Write([]byte{byte(Version), byte(NoAcceptableMethods)})
+
+	if !slices.Contains(buf[:nMethods], byte(NoAuthenticationRequired)) {
+		conn.Write([]byte{byte(Version), byte(NoAcceptableMethods)})
 		return nil, ErrNoAcceptableMethods
 	}
-	
+
 	//+----+--------+
 	//|VER | METHOD |
 	//+----+--------+
 	//| 1  |   1    |
 	//+----+--------+
-	if _, err = rw.Write([]byte{byte(Version), byte(NoAuthenticationRequired)}); err != nil {
+	if _, err = conn.Write([]byte{byte(Version), byte(NoAuthenticationRequired)}); err != nil {
 		return nil, err
 	}
-	
-	_, err = io.ReadFull(rw, buf[:3]) // VER + CMD + RSV
+
+	_, err = io.ReadFull(conn, buf[:3]) // VER + CMD + RSV
 	if err != nil {
 		return nil, err
 	}
-	
+
 	cmd := Command(buf[1])
-	
-	addr, err := ReadAddrFrom(rw)
+
+	addr, err := ReadAddrFrom(conn)
 	if err != nil {
 		return nil, err
 	}
-	
-	return &TCPRequest{cmd, addr}, nil
+
+	req = &TCPRequest{
+		Command: cmd,
+		Addr:    addr,
+	}
+
+	return req, nil
 }
 
 type ReplyFiled byte
@@ -161,7 +167,7 @@ func (r *TCPResponse) Bytes() []byte {
 	)
 }
 
-func (r *TCPResponse) ReplyTo(conn net.Conn) error {
+func (r *TCPResponse) ReplyTo(conn io.Writer) error {
 	_, err := conn.Write(r.Bytes())
 	return err
 }

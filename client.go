@@ -74,7 +74,7 @@ func handleConnection(ctx context.Context, conn net.Conn, logger *slog.Logger, c
 		return err
 	}
 
-	targetAddr, err := handshaker.Handshake(ctx, conn)
+	targetAddr, err := handshaker.Handshake(conn, shadowsocks.HandshakeTimeout)
 	if err != nil {
 		return err
 	}
@@ -100,12 +100,12 @@ func handleConnection(ctx context.Context, conn net.Conn, logger *slog.Logger, c
 		return err
 	}
 
-	stc, err := shadowsocks.NewShadowTCPConn(seAddr, key, cfg.CipherMethod, logger)
+	stc, err := shadowsocks.NewShadowTCPConn(seAddr, key, cfg.CipherMethod)
 	if err != nil {
 		return err
 	}
 
-	stc.Stream(ctx, conn, targetAddr, initialPayload)
+	stc.Stream(ctx, conn, targetAddr, initialPayload, logger)
 	return nil
 }
 

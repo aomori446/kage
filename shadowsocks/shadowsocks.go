@@ -27,6 +27,7 @@ const (
 	MaxPaddingLength        = 900
 	MaxInitialPayloadLength = 8192
 	MaxPayloadLength        = 0xFFFF
+	HandshakeTimeout        = 5 * time.Second
 )
 
 const (

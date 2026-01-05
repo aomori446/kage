@@ -32,10 +32,10 @@ func ReadAddrFrom(r io.Reader) (*Addr, error) {
 	if _, err := io.ReadFull(r, b); err != nil {
 		return nil, err
 	}
-	
+
 	atyp := Atyp(b[0])
 	var addr []byte
-	
+
 	switch atyp {
 	case AtypIPV4:
 		addr = make([]byte, net.IPv4len)
@@ -59,14 +59,14 @@ func ReadAddrFrom(r io.Reader) (*Addr, error) {
 	default:
 		return nil, ErrAddressTypeNotSupported
 	}
-	
+
 	portBuf := make([]byte, 2)
 	if _, err := io.ReadFull(r, portBuf); err != nil {
 		return nil, err
 	}
-	
+
 	port := binary.BigEndian.Uint16(portBuf)
-	
+
 	return &Addr{
 		ATYP: atyp,
 		Addr: addr,
@@ -79,10 +79,10 @@ func ParseAddrFromString(s string) (*Addr, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var addr []byte
 	var atyp Atyp
-	
+
 	ip := net.ParseIP(host)
 	if ip == nil {
 		if len(host) > 0xFF {
@@ -97,7 +97,7 @@ func ParseAddrFromString(s string) (*Addr, error) {
 		addr = ip.To16()
 		atyp = AtypIPV6
 	}
-	
+
 	port, err := strconv.Atoi(p)
 	if err != nil {
 		return nil, err
@@ -109,30 +109,14 @@ func ParseAddrFromString(s string) (*Addr, error) {
 	}, nil
 }
 
-func ParseAddrFromUDPAddr(addr *net.UDPAddr) *Addr {
-	if ip4 := addr.IP.To4(); ip4 != nil {
-		return &Addr{
-			ATYP: AtypIPV4,
-			Addr: ip4,
-			Port: uint16(addr.Port),
-		}
-	}
-	
-	return &Addr{
-		ATYP: AtypIPV6,
-		Addr: addr.IP.To16(),
-		Port: uint16(addr.Port),
-	}
-}
-
 func (a *Addr) Bytes() []byte {
 	addrLen := len(a.Addr)
 	if a.ATYP == AtypDomainName {
 		addrLen += 1
 	}
-	
+
 	buf := make([]byte, 1+addrLen+2)
-	
+
 	buf[0] = byte(a.ATYP)
 	if a.ATYP == AtypDomainName {
 		buf[1] = byte(len(a.Addr))
@@ -140,7 +124,7 @@ func (a *Addr) Bytes() []byte {
 	} else {
 		copy(buf[1:], a.Addr)
 	}
-	
+
 	binary.BigEndian.PutUint16(buf[1+addrLen:], a.Port)
 	return buf
 }

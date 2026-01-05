@@ -23,13 +23,10 @@ type ShadowTCPConn struct {
 
 	buffer sync.Pool
 
-	handshakePayload        []byte
-	readServerHandshakeOnce sync.Once
-
-	logger *slog.Logger
+	readServerHandshakeOnce func() ([]byte, error)
 }
 
-func NewShadowTCPConn(serverAddr *net.TCPAddr, key []byte, method config.CipherMethod, logger *slog.Logger) (*ShadowTCPConn, error) {
+func NewShadowTCPConn(serverAddr *net.TCPAddr, key []byte, method config.CipherMethod) (*ShadowTCPConn, error) {
 	shadowConn, err := net.DialTCP("tcp", nil, serverAddr)
 	if err != nil {
 		return nil, err
@@ -48,7 +45,6 @@ func NewShadowTCPConn(serverAddr *net.TCPAddr, key []byte, method config.CipherM
 	stc := &ShadowTCPConn{
 		shadowConn: shadowConn,
 		enCipher:   enCipher,
-		logger:     logger,
 		buffer: sync.Pool{
 			New: func() any {
 				buf := make([]byte, bufSize)
@@ -56,21 +52,21 @@ func NewShadowTCPConn(serverAddr *net.TCPAddr, key []byte, method config.CipherM
 			},
 		},
 	}
+
+	stc.readServerHandshakeOnce = sync.OnceValues(func() ([]byte, error) {
+		return stc.readServerHandshake()
+	})
+
 	return stc, nil
 }
 
 func (stc *ShadowTCPConn) Read(p []byte) (n int, err error) {
-	var handshakeErr error
-	stc.readServerHandshakeOnce.Do(func() {
-		handshakeErr = stc.readServerHandshake()
-	})
-	if handshakeErr != nil {
-		return 0, handshakeErr
+	payload, err := stc.readServerHandshakeOnce()
+	if err != nil {
+		return 0, err
 	}
-
-	if len(stc.handshakePayload) > 0 {
-		n = copy(p, stc.handshakePayload)
-		stc.handshakePayload = stc.handshakePayload[n:]
+	if len(payload) > 0 {
+		n = copy(p, payload)
 		return n, nil
 	}
 
@@ -122,15 +118,15 @@ func (stc *ShadowTCPConn) Close() error {
 	return stc.shadowConn.Close()
 }
 
-func (stc *ShadowTCPConn) Stream(ctx context.Context, conn net.Conn, targetAddr *socks5.Addr, initialPayload []byte) {
+func (stc *ShadowTCPConn) Stream(ctx context.Context, conn net.Conn, targetAddr *socks5.Addr, initialPayload []byte, logger *slog.Logger) {
 	defer stc.Close()
 	defer conn.Close()
 
 	if err := stc.writeClientHandshake(targetAddr, initialPayload); err != nil {
-		stc.logger.Warn("write client handshake failed", "err", err)
+		logger.Warn("write client handshake failed", "err", err)
 	}
 
-	stc.logger.Info("shadowsocks connection streaming started")
+	logger.Info("shadowsocks connection streaming started")
 
 	errChan := make(chan error, 3)
 
@@ -154,9 +150,9 @@ func (stc *ShadowTCPConn) Stream(ctx context.Context, conn net.Conn, targetAddr 
 
 	err := <-errChan
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) && !errors.Is(err, net.ErrClosed) {
-		stc.logger.Debug("shadowsocks connection streaming closed with error", "err", err)
+		logger.Debug("shadowsocks connection streaming closed with error", "err", err)
 	}
-	stc.logger.Info("shadowsocks connection streaming closed")
+	logger.Info("shadowsocks connection streaming closed")
 }
 
 func (stc *ShadowTCPConn) writeClientHandshake(targetAddr *socks5.Addr, initialPayload []byte) error {
@@ -176,48 +172,49 @@ func (stc *ShadowTCPConn) writeClientHandshake(targetAddr *socks5.Addr, initialP
 	return err
 }
 
-func (stc *ShadowTCPConn) readServerHandshake() error {
+func (stc *ShadowTCPConn) readServerHandshake() ([]byte, error) {
 	respSaltLen := len(stc.enCipher.salt)
 
 	buf := make([]byte, respSaltLen+1+8+respSaltLen+2+stc.enCipher.Overhead())
 	_, err := io.ReadFull(stc.shadowConn, buf)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	respSalt := buf[:respSaltLen]
 	deCipher, err := stc.enCipher.ReNew(respSalt)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	stc.deCipher = deCipher
 
 	encryptedFLH := buf[respSaltLen:]
 	buf, err = deCipher.Open(nil, encryptedFLH)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	flh, err := parseResponseFLH(buf, stc.enCipher.salt)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if flh.l > 0 {
 		buf = make([]byte, int(flh.l)+deCipher.Overhead())
 		_, err = io.ReadFull(stc.shadowConn, buf)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		payload, err := deCipher.Open(buf[:0], buf)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		stc.handshakePayload = payload
+
+		return payload, nil
 	}
 
-	return nil
+	return nil, nil
 }
 
 type requestVLH struct {
@@ -310,8 +307,6 @@ func (f *responseFLH) validate() error {
 	return nil
 }
 
-// ReadInitialPayload attempts to read the initial payload from the connection with a short timeout.
-// It returns the data read (if any) and any error encountered (excluding timeout).
 func ReadInitialPayload(conn net.Conn, timeout time.Duration) ([]byte, error) {
 	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return nil, err

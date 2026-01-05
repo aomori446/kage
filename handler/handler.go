@@ -2,16 +2,16 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"net"
-	
+	"time"
+
 	"github.com/aomori446/kage/config"
 	"github.com/aomori446/kage/socks5"
 )
 
 type TCPHandshaker interface {
-	Handshake(ctx context.Context, conn net.Conn) (*socks5.Addr, error)
+	Handshake(conn net.Conn, timeout time.Duration) (*socks5.Addr, error)
 }
 
 func NewTCPHandshaker(protocol config.Protocol, forwardAddr *socks5.Addr) (TCPHandshaker, error) {
@@ -27,20 +27,20 @@ func NewTCPHandshaker(protocol config.Protocol, forwardAddr *socks5.Addr) (TCPHa
 
 type TCPSocks5Handshaker struct{}
 
-func (h *TCPSocks5Handshaker) Handshake(ctx context.Context, conn net.Conn) (*socks5.Addr, error) {
-	req, err := socks5.TCPHandShake(ctx, conn)
+func (h *TCPSocks5Handshaker) Handshake(conn net.Conn, timeout time.Duration) (*socks5.Addr, error) {
+	req, err := socks5.TCPHandShake(conn, timeout)
 	if err != nil {
 		return nil, err
 	}
-	
-	if err = req.Command.Valid(socks5.Connect, conn); err != nil {
+
+	if err = req.Command.Validate(socks5.Connect, conn); err != nil {
 		return nil, err
 	}
-	
+
 	if err = socks5.NewSuccessTCPResponse().ReplyTo(conn); err != nil {
 		return nil, err
 	}
-	
+
 	return req.Addr, nil
 }
 
@@ -48,7 +48,7 @@ type TCPTunnelHandshaker struct {
 	ForwardAddr *socks5.Addr
 }
 
-func (h *TCPTunnelHandshaker) Handshake(ctx context.Context, conn net.Conn) (*socks5.Addr, error) {
+func (h *TCPTunnelHandshaker) Handshake(conn net.Conn, timeout time.Duration) (*socks5.Addr, error) {
 	return h.ForwardAddr, nil
 }
 
@@ -80,7 +80,7 @@ func (U *UDPSocks5PacketHandler) HandleInbound(packet []byte) ([]byte, error) {
 	if len(packet) < 3 {
 		return nil, errors.New("packet too short")
 	}
-	
+
 	// discard RSV and FRAG, keep Addr and DATA
 	return packet[3:], nil
 }
@@ -91,7 +91,6 @@ func (U *UDPSocks5PacketHandler) HandleOutbound(packet []byte) ([]byte, error) {
 	//+----+------+------+----------+----------+----------+
 	//| 2  |  1   |  1   | Variable |    2     | Variable |
 	//+----+------+------+----------+----------+----------+
-	
 	header := make([]byte, 3) // RSV = 0x0000, FRAG = 0x00
 	return append(header, packet...), nil
 }
