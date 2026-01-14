@@ -25,7 +25,6 @@ var (
 const (
 	Connect      Command = 0x01
 	Bind         Command = 0x02
-	UDPAssociate Command = 0x03
 )
 
 type Command byte

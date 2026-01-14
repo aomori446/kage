@@ -63,7 +63,7 @@ func (c *Config) Validate() error {
 	}
 
 	switch c.Mode {
-	case ModeTCPOnly, ModeUDPOnly, ModeTCPAndUDP:
+	case ModeTCPOnly:
 		// valid
 	default:
 		return fmt.Errorf("%w: %s", ErrUnknownMode, c.Mode)

@@ -56,43 +56,6 @@ func (c *Socks5Client) Serve(ctx context.Context) error {
 			return err
 		}
 		return proxy.Serve(ctx, c.logger)
-	case config.ModeUDPOnly:
-		ph := &handler.UDPSocks5PacketHandler{}
-		proxy, err := newUDPProxy(c.cfg, ph)
-		if err != nil {
-			return err
-		}
-		return proxy.Serve(ctx, c.logger)
-	case config.ModeTCPAndUDP:
-		// TCP
-		handshaker := &handler.TCPSocks5Handshaker{}
-		tcpProxy, err := newTCPProxy(c.cfg, handshaker)
-		if err != nil {
-			return err
-		}
-
-		// UDP
-		ph := &handler.UDPSocks5PacketHandler{}
-		udpProxy, err := newUDPProxy(c.cfg, ph)
-		if err != nil {
-			return err
-		}
-
-		// Run both
-		errChan := make(chan error, 2)
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-
-		go func() {
-			errChan <- tcpProxy.Serve(ctx, c.logger)
-		}()
-		go func() {
-			errChan <- udpProxy.Serve(ctx, c.logger)
-		}()
-
-		// Wait for the first error or completion
-		return <-errChan
-
 	default:
 		return config.ErrUnknownMode
 	}
@@ -129,42 +92,6 @@ func (c *TunnelClient) Serve(ctx context.Context) error {
 			return err
 		}
 		return proxy.Serve(ctx, c.logger)
-	case config.ModeUDPOnly:
-		ph := &handler.UDPTunnelPacketHandler{ForwardAddr: foAddr}
-		proxy, err := newUDPProxy(c.cfg, ph)
-		if err != nil {
-			return err
-		}
-		return proxy.Serve(ctx, c.logger)
-	case config.ModeTCPAndUDP:
-		// TCP
-		handshaker := &handler.TCPTunnelHandshaker{ForwardAddr: foAddr}
-		tcpProxy, err := newTCPProxy(c.cfg, handshaker)
-		if err != nil {
-			return err
-		}
-
-		// UDP
-		ph := &handler.UDPTunnelPacketHandler{ForwardAddr: foAddr}
-		udpProxy, err := newUDPProxy(c.cfg, ph)
-		if err != nil {
-			return err
-		}
-
-		// Run both
-		errChan := make(chan error, 2)
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-
-		go func() {
-			errChan <- tcpProxy.Serve(ctx, c.logger)
-		}()
-		go func() {
-			errChan <- udpProxy.Serve(ctx, c.logger)
-		}()
-
-		return <-errChan
-
 	default:
 		return config.ErrUnknownMode
 	}
@@ -268,50 +195,4 @@ func (c *tcpProxy) handleConnection(ctx context.Context, conn net.Conn, logger *
 	
 	stc.Stream(ctx, conn, targetAddr, initialPayload, logger)
 	return nil
-}
-
-// --- UDP Proxy ---
-
-type udpProxy struct {
-	lnAddr       *net.UDPAddr
-	serverAddr   *net.UDPAddr
-	key          []byte
-	cipherMethod config.CipherMethod
-	ph           handler.UDPPacketHandler
-}
-
-func newUDPProxy(cfg *config.Config, ph handler.UDPPacketHandler) (*udpProxy, error) {
-	lnAddr, err := net.ResolveUDPAddr("udp", cfg.GetLocalAddr())
-	if err != nil {
-		return nil, err
-	}
-
-	serverAddr, err := net.ResolveUDPAddr("udp", cfg.GetServerAddr())
-	if err != nil {
-		return nil, err
-	}
-
-	key, err := base64.StdEncoding.DecodeString(cfg.Password)
-	if err != nil {
-		return nil, err
-	}
-
-	return &udpProxy{
-		lnAddr:       lnAddr,
-		serverAddr:   serverAddr,
-		key:          key,
-		cipherMethod: cfg.Method,
-		ph:           ph,
-	}, nil
-}
-
-func (u *udpProxy) Serve(ctx context.Context, logger *slog.Logger) error {
-	logger.Info("UDP client started", "listenAddr", u.lnAddr.String())
-	
-	r, err := shadowsocks.NewRelayer(u.key, u.cipherMethod, u.lnAddr, u.serverAddr, u.ph, logger)
-	if err != nil {
-		return err
-	}
-	
-	return r.Relay(ctx)
 }

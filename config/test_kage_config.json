@@ -3,7 +3,7 @@
   "server_port": 9999,
   "local_address": "127.0.0.1",
   "local_port": 9997,
-  "mode": "tcp_and_udp",
+  "mode": "tcp_only",
   "protocol": "socks",
   "fast_open": true,
   "password": "rwQc8qPXVsRpGx3uW+Y3Lj4Y42yF9Bs0xg1pmx8/+bo=",

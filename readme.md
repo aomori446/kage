@@ -6,7 +6,7 @@ Kage は、Go言語で記述された軽量かつ高性能な Shadowsocks 実装
 
 - **プロトコルサポート**: Shadowsocks プロトコルと最新の暗号化方式を実装しています。
 - **暗号化方式**: `2022-blake3-aes-256-gcm` などの標準的な暗号化方式をサポートしています。
-- **モード**: TCP および UDP のトラフィック転送をサポートしています。（UDP通信もサポートしています！！）
+- **モード**: TCP のトラフィック転送をサポートしています。
 - **Fast Open**: レイテンシを削減するための TCP Fast Open (TFO) をサポートしています。
 - **トンネリング**: 柔軟なネットワーク構成のためにトンネルモードで動作可能です。
 - **軽量**: 依存関係を最小限に抑え、パフォーマンスのために最適化されています。
@@ -42,7 +42,7 @@ go get github.com/aomori446/kage
   "local_port": 1080,
   "password": "your-password",
   "method": "2022-blake3-aes-256-gcm",
-  "mode": "tcp_and_udp",
+  "mode": "tcp_only",
   "protocol": "socks",
   "fast_open": true
 }
@@ -112,8 +112,6 @@ func main() {
 - `method` / `Method`: 暗号化方式 (例: `2022-blake3-aes-256-gcm`)。
 - `mode` / `Mode`: 動作モード。
   - `tcp_only` (TCPのみ)
-  - `udp_only` (UDPのみ)
-  - `tcp_and_udp` (両方)
 - `protocol` / `Protocol`: プロトコルタイプ。
   - `socks` (SOCKS5 プロキシ)
   - `tunnel` (ポートフォワーディング/トンネル)

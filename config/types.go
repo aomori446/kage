@@ -7,8 +7,6 @@ type Mode string
 
 const (
 	ModeTCPOnly   Mode = "tcp_only"
-	ModeUDPOnly   Mode = "udp_only"
-	ModeTCPAndUDP Mode = "tcp_and_udp"
 )
 
 // Protocol defines the proxy protocol used by the client (Socks or Tunnel).
