@@ -1,31 +1,62 @@
 # Kage (影)
 
-## UDP通信はsupportしております！！
+Kage は、Go言語で記述された軽量かつ高性能な Shadowsocks 実装です。シンプルで効率的、そして既存のプロジェクトに統合しやすいように設計されています。
 
-Kage is a lightweight, high-performance Shadowsocks implementation written in Go. It is designed to be simple, efficient, and easy to integrate.
+## 特徴 (Features)
 
-## Features
+- **プロトコルサポート**: Shadowsocks プロトコルと最新の暗号化方式を実装しています。
+- **暗号化方式**: `2022-blake3-aes-256-gcm` などの標準的な暗号化方式をサポートしています。
+- **モード**: TCP および UDP のトラフィック転送をサポートしています。（UDP通信もサポートしています！！）
+- **Fast Open**: レイテンシを削減するための TCP Fast Open (TFO) をサポートしています。
+- **トンネリング**: 柔軟なネットワーク構成のためにトンネルモードで動作可能です。
+- **軽量**: 依存関係を最小限に抑え、パフォーマンスのために最適化されています。
+- **CLI サポート**: JSON 設定ファイルを使用したコマンドラインツールとして利用可能です。
 
-- **Protocol Support**: Implements the Shadowsocks protocol with modern cipher support.
-- **Cipher Methods**: Supports `2022-blake3-aes-256-gcm` and other standard ciphers.
-- **Modes**: Supports both TCP and UDP traffic forwarding.
-- **Fast Open**: Includes TCP Fast Open (TFO) support for reduced latency.
-- **Tunneling**: Can operate in tunnel mode for flexible networking setups.
-- **Lightweight**: Minimal dependencies and optimized for performance.
+## インストール (Installation)
 
-## Installation
+Go 1.25 以上がインストールされている必要があります。
 
-Ensure you have Go 1.25 or later installed.
+### CLI ツールとしてインストール
+
+```bash
+go install github.com/aomori446/kage/cmd/kage@latest
+```
+
+### ライブラリとしてインストール
 
 ```bash
 go get github.com/aomori446/kage
 ```
 
-## Usage
+## 使い方 (Usage)
 
-### As a Library
+### CLI (コマンドライン) として使用
 
-You can easily embed Kage into your own Go applications.
+設定ファイル (`config.json`) を作成します：
+
+```json
+{
+  "server": "example.com",
+  "server_port": 8388,
+  "local_address": "127.0.0.1",
+  "local_port": 1080,
+  "password": "your-password",
+  "method": "2022-blake3-aes-256-gcm",
+  "mode": "tcp_and_udp",
+  "protocol": "socks",
+  "fast_open": true
+}
+```
+
+作成した設定ファイルを指定して実行します：
+
+```bash
+kage -c config.json
+```
+
+### ライブラリとして使用
+
+Kage を独自の Go アプリケーションに簡単に組み込むことができます。
 
 ```go
 package main
@@ -41,6 +72,7 @@ import (
 )
 
 func main() {
+	// 設定構造体の作成
 	cfg := &config.Config{
 		LocalAddr:  "127.0.0.1",
 		LocalPort:  1080,
@@ -52,54 +84,63 @@ func main() {
 		Protocol:   config.ProtocolSocks,
 	}
 
+	// ロガーの設定
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	// Create the client
+	// クライアントの作成
 	client, err := kage.NewClient(cfg, logger)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Run the client
+	// クライアントの実行
 	if err := client.Serve(context.Background()); err != nil {
 		log.Fatal(err)
 	}
 }
 ```
 
-### Configuration
+### 設定 (Configuration)
 
-The `config.Config` struct allows you to customize the behavior:
+`config.json` や `config.Config` 構造体で以下の項目を設定できます：
 
-- `LocalAddr`, `LocalPort`: Local address and port to listen on.
-- `Server`, `ServerPort`: Remote Shadowsocks server address and port.
-- `ForwardAddr`, `ForwardPort`: Address and port to forward traffic to (for tunnel mode).
-- `Password`: Your Shadowsocks password/key.
-- `Method`: Encryption method (e.g., `CipherMethod2022blake3aes256gcm`).
-- `Mode`: `ModeTCPOnly`, `ModeUDPOnly`, or `ModeTCPAndUDP`.
-- `Protocol`: `ProtocolSocks` or `ProtocolTunnel`.
-- `FastOpen`: Enable TCP Fast Open.
+- `local_address` / `LocalAddr`: リッスンするローカルアドレス。
+- `local_port` / `LocalPort`: リッスンするローカルポート。
+- `server` / `Server`: リモートの Shadowsocks サーバーアドレス。
+- `server_port` / `ServerPort`: リモートの Shadowsocks サーバーポート。
+- `password` / `Password`: Shadowsocks のパスワード/キー。
+- `method` / `Method`: 暗号化方式 (例: `2022-blake3-aes-256-gcm`)。
+- `mode` / `Mode`: 動作モード。
+  - `tcp_only` (TCPのみ)
+  - `udp_only` (UDPのみ)
+  - `tcp_and_udp` (両方)
+- `protocol` / `Protocol`: プロトコルタイプ。
+  - `socks` (SOCKS5 プロキシ)
+  - `tunnel` (ポートフォワーディング/トンネル)
+- `forward_address` / `ForwardAddr`: (トンネルモード用) 転送先のアドレス。
+- `forward_port` / `ForwardPort`: (トンネルモード用) 転送先のポート。
+- `fast_open` / `FastOpen`: TCP Fast Open を有効にするかどうか。
 
-## Development
+## 開発 (Development)
 
-### Prerequisites
+### 前提条件
 
-- Go 1.25+
+- Go 1.25 以上
 
-### Running Tests
+### テストの実行
 
 ```bash
 go test ./...
 ```
 
-## TODO
+## TODO (今後の予定)
 
-- [ ] Implement server side
-- [ ] Add plugin support (SIPs)
-- [ ] Support multiple servers (Load Balancing / Failover)
-- [ ] Add ACL / Routing support
-- [ ] Improve test coverage
+- [ ] サーバー側の実装
+- [ ] プラグインサポート (SIPs)
+- [ ] 複数サーバーのサポート (ロードバランシング / フェイルオーバー)
+- [ ] ACL / ルーティングのサポート
+- [ ] テストカバレッジの向上
 
-## License
+## ライセンス (License)
 
 [MIT License](LICENSE)

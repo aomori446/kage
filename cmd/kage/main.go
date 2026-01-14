@@ -28,7 +28,7 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 	
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	
 	client, err := kage.NewClient(cfg, logger)
 	if err != nil {
