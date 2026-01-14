@@ -23,7 +23,9 @@ type ShadowTCPConn struct {
 
 	buffer sync.Pool
 
-	readServerHandshakeOnce func() ([]byte, error)
+	handshakeOnce   sync.Once
+	handshakeErr    error
+	leftoverPayload []byte
 }
 
 func NewShadowTCPConn(serverAddr *net.TCPAddr, key []byte, method config.CipherMethod) (*ShadowTCPConn, error) {
@@ -53,20 +55,25 @@ func NewShadowTCPConn(serverAddr *net.TCPAddr, key []byte, method config.CipherM
 		},
 	}
 
-	stc.readServerHandshakeOnce = sync.OnceValues(func() ([]byte, error) {
-		return stc.readServerHandshake()
-	})
-
 	return stc, nil
 }
 
 func (stc *ShadowTCPConn) Read(p []byte) (n int, err error) {
-	payload, err := stc.readServerHandshakeOnce()
-	if err != nil {
-		return 0, err
+	stc.handshakeOnce.Do(func() {
+		var payload []byte
+		payload, stc.handshakeErr = stc.readServerHandshake()
+		if len(payload) > 0 {
+			stc.leftoverPayload = payload
+		}
+	})
+
+	if stc.handshakeErr != nil {
+		return 0, stc.handshakeErr
 	}
-	if len(payload) > 0 {
-		n = copy(p, payload)
+
+	if len(stc.leftoverPayload) > 0 {
+		n = copy(p, stc.leftoverPayload)
+		stc.leftoverPayload = stc.leftoverPayload[n:]
 		return n, nil
 	}
 

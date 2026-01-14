@@ -1,0 +1,6 @@
+{
+  "server": "127.0.0.1",
+  "server_port": 9999,
+  "password": "rwQc8qPXVsRpGx3uW+Y3Lj4Y42yF9Bs0xg1pmx8/+bo=",
+  "method": "2022-blake3-aes-256-gcm"
+}

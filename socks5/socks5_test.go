@@ -115,7 +115,14 @@ func TestTCPHandShake(t *testing.T) {
 				return server, func() { server.Close() }
 			},
 			timeout: time.Second,
-			wantReq: &TCPRequest{},
+			wantReq: &TCPRequest{
+				Command: Connect,
+				Addr: &Addr{
+					ATYP: AtypIPV4,
+					Addr: net.IPv4(127, 0, 0, 1).To4(),
+					Port: 8080,
+				},
+			},
 			wantErr: false,
 		},
 	}

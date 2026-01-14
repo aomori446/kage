@@ -141,5 +141,18 @@ func (a *Addr) String() string {
 	default:
 		return "unknown"
 	}
+
+	if a.Port == 443 {
+		if a.ATYP == AtypIPV6 {
+			return "https://[" + host + "]"
+		}
+		return "https://" + host
+	} else if a.Port == 80 {
+		if a.ATYP == AtypIPV6 {
+			return "http://[" + host + "]"
+		}
+		return "http://" + host
+	}
+
 	return net.JoinHostPort(host, strconv.Itoa(int(a.Port)))
 }

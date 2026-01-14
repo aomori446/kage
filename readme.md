@@ -33,6 +33,8 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
+	"os"
 	
 	"github.com/aomori446/kage"
 	"github.com/aomori446/kage/config"
@@ -40,15 +42,26 @@ import (
 
 func main() {
 	cfg := &config.Config{
-		ListenAddr:   "127.0.0.1:1080",
-		ServerAddr:   "example.com:8388",
-		Password:     "your-password",
-		CipherMethod: config.CipherMethod2022blake3aes256gcm,
-		Mode:         config.ModeTCP,
+		LocalAddr:  "127.0.0.1",
+		LocalPort:  1080,
+		Server:     "example.com",
+		ServerPort: 8388,
+		Password:   "your-password",
+		Method:     config.CipherMethod2022blake3aes256gcm,
+		Mode:       config.ModeTCPOnly,
+		Protocol:   config.ProtocolSocks,
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	// Create the client
+	client, err := kage.NewClient(cfg, logger)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	// Run the client
-	if err := kage.RunClient(context.Background(), nil, cfg); err != nil {
+	if err := client.Serve(context.Background()); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -58,12 +71,12 @@ func main() {
 
 The `config.Config` struct allows you to customize the behavior:
 
-- `ListenAddr`: Local address to listen on (e.g., `127.0.0.1:1080`).
-- `ServerAddr`: Remote Shadowsocks server address.
-- `ForwardAddr`: Address to forward traffic to (for tunnel mode).
+- `LocalAddr`, `LocalPort`: Local address and port to listen on.
+- `Server`, `ServerPort`: Remote Shadowsocks server address and port.
+- `ForwardAddr`, `ForwardPort`: Address and port to forward traffic to (for tunnel mode).
 - `Password`: Your Shadowsocks password/key.
-- `CipherMethod`: Encryption method (e.g., `CipherMethod2022blake3aes256gcm`).
-- `Mode`: `ModeTCP` or `ModeUDP`.
+- `Method`: Encryption method (e.g., `CipherMethod2022blake3aes256gcm`).
+- `Mode`: `ModeTCPOnly`, `ModeUDPOnly`, or `ModeTCPAndUDP`.
 - `Protocol`: `ProtocolSocks` or `ProtocolTunnel`.
 - `FastOpen`: Enable TCP Fast Open.
 

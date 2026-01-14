@@ -16,7 +16,7 @@ type TCPHandshaker interface {
 
 func NewTCPHandshaker(protocol config.Protocol, forwardAddr *socks5.Addr) (TCPHandshaker, error) {
 	switch protocol {
-	case config.ProtocolSocks5:
+	case config.ProtocolSocks:
 		return &TCPSocks5Handshaker{}, nil
 	case config.ProtocolTunnel:
 		return &TCPTunnelHandshaker{ForwardAddr: forwardAddr}, nil
@@ -59,7 +59,7 @@ type UDPPacketHandler interface {
 
 func NewUDPPacketHandler(protocol config.Protocol, forwardAddr *socks5.Addr) (UDPPacketHandler, error) {
 	switch protocol {
-	case config.ProtocolSocks5:
+	case config.ProtocolSocks:
 		return &UDPSocks5PacketHandler{}, nil
 	case config.ProtocolTunnel:
 		return &UDPTunnelPacketHandler{ForwardAddr: forwardAddr}, nil

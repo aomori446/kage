@@ -15,7 +15,7 @@ const (
 
 var (
 	ErrHandshake = func(err error) error { return fmt.Errorf("handshake failed: %w", err) }
-
+	
 	ErrVersionNotSupported = errors.New("socks5: version not supported")
 	ErrCommandNotSupported = errors.New("socks5: command not supported")
 	ErrMethodsCount        = errors.New("socks5: invalid methods count")
@@ -72,12 +72,12 @@ func TCPHandShake(conn net.Conn, timeout time.Duration) (req *TCPRequest, err er
 			err = ErrHandshake(err)
 		}
 	}()
-
+	
 	if err = conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return
 	}
 	defer conn.SetDeadline(time.Time{})
-
+	
 	//+----+----------+----------+
 	//|VER | NMETHODS | METHODS  |
 	//+----+----------+----------+
@@ -88,27 +88,27 @@ func TCPHandShake(conn net.Conn, timeout time.Duration) (req *TCPRequest, err er
 	if err != nil {
 		return nil, err
 	}
-
+	
 	v := buf[0]
 	if v != Version {
 		return nil, ErrVersionNotSupported
 	}
-
+	
 	nMethods := int(buf[1])
 	if nMethods < 1 {
 		return nil, ErrMethodsCount
 	}
-
+	
 	_, err = io.ReadFull(conn, buf[:nMethods])
 	if err != nil {
 		return nil, err
 	}
-
+	
 	if !slices.Contains(buf[:nMethods], byte(NoAuthenticationRequired)) {
 		conn.Write([]byte{byte(Version), byte(NoAcceptableMethods)})
 		return nil, ErrNoAcceptableMethods
 	}
-
+	
 	//+----+--------+
 	//|VER | METHOD |
 	//+----+--------+
@@ -117,24 +117,24 @@ func TCPHandShake(conn net.Conn, timeout time.Duration) (req *TCPRequest, err er
 	if _, err = conn.Write([]byte{byte(Version), byte(NoAuthenticationRequired)}); err != nil {
 		return nil, err
 	}
-
+	
 	_, err = io.ReadFull(conn, buf[:3]) // VER + CMD + RSV
 	if err != nil {
 		return nil, err
 	}
-
+	
 	cmd := Command(buf[1])
-
+	
 	addr, err := ReadAddrFrom(conn)
 	if err != nil {
 		return nil, err
 	}
-
+	
 	req = &TCPRequest{
 		Command: cmd,
 		Addr:    addr,
 	}
-
+	
 	return req, nil
 }
 

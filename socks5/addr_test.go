@@ -201,6 +201,42 @@ func TestAddr_String(t *testing.T) {
 			},
 			want: "[::1]:8080",
 		},
+		{
+			name: "https://example.org",
+			fields: fields{
+				ATYP: AtypDomainName,
+				Addr: []byte("example.org"),
+				Port: 443,
+			},
+			want: "https://example.org",
+		},
+		{
+			name: "http://example.org",
+			fields: fields{
+				ATYP: AtypDomainName,
+				Addr: []byte("example.org"),
+				Port: 80,
+			},
+			want: "http://example.org",
+		},
+		{
+			name: "https://127.0.0.1",
+			fields: fields{
+				ATYP: AtypIPV4,
+				Addr: net.IPv4(127, 0, 0, 1).To4(),
+				Port: 443,
+			},
+			want: "https://127.0.0.1",
+		},
+		{
+			name: "https://[::1]",
+			fields: fields{
+				ATYP: AtypIPV6,
+				Addr: net.IPv6loopback,
+				Port: 443,
+			},
+			want: "https://[::1]",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
