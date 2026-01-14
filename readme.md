@@ -1,5 +1,7 @@
 # Kage (影)
 
+## UDP通信はsupportしております！！
+
 Kage is a lightweight, high-performance Shadowsocks implementation written in Go. It is designed to be simple, efficient, and easy to integrate.
 
 ## Features
