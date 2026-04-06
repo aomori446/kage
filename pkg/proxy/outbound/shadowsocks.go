@@ -2,50 +2,56 @@ package outbound
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"io"
 	"kage/pkg/core"
 	sscrypto "kage/pkg/crypto/shadowsocks"
 	ssproto "kage/pkg/protocol/shadowsocks"
+	"kage/pkg/protocol/socks5"
 	"log/slog"
 	"net"
+	"sync"
+	"time"
 )
 
-type Shadowsocks struct {
+type ShadowConn struct {
 	net.Conn
-	
+
 	Method   string
 	enCipher *sscrypto.Cipher
 	deCipher *sscrypto.Cipher
-	
+
 	readBuffer []byte
-	
+
 	readResponseHeaderOnce bool
 	writeRequestHeaderOnce bool
-	
+
 	targetAddr     *core.Address
 	initialPayload []byte
 }
 
-func NewShadowsocks(conn net.Conn, method string, enCipher *sscrypto.Cipher, targetAddr *core.Address, initialPayload []byte) *Shadowsocks {
-	return &Shadowsocks{
+func NewShadowConn(conn net.Conn, method string, enCipher *sscrypto.Cipher, targetAddr *core.Address, initialPayload []byte) *ShadowConn {
+	return &ShadowConn{
 		Conn:     conn,
 		Method:   method,
 		enCipher: enCipher,
 		deCipher: nil,
-		
+
 		readBuffer: make([]byte, 0),
-		
+
 		readResponseHeaderOnce: false,
 		writeRequestHeaderOnce: false,
-		
+
 		targetAddr:     targetAddr,
 		initialPayload: initialPayload,
 	}
 }
 
-func (s *Shadowsocks) Write(p []byte) (n int, err error) {
+func (s *ShadowConn) Write(p []byte) (n int, err error) {
 	var buf []byte
 	if !s.writeRequestHeaderOnce {
 		flHeader, vlHeader, err := ssproto.PackRequestHeader(s.targetAddr, s.initialPayload)
@@ -57,14 +63,14 @@ func (s *Shadowsocks) Write(p []byte) (n int, err error) {
 		buf = s.enCipher.Seal(buf, vlHeader)
 		s.writeRequestHeaderOnce = true
 	}
-	
+
 	if len(p) > 0 {
 		payloadSize := make([]byte, 2)
 		binary.BigEndian.PutUint16(payloadSize, uint16(len(p)))
 		buf = s.enCipher.Seal(buf, payloadSize)
 		buf = s.enCipher.Seal(buf, p)
 	}
-	
+
 	if len(buf) > 0 {
 		_, err = s.Conn.Write(buf)
 		if err != nil {
@@ -74,34 +80,34 @@ func (s *Shadowsocks) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-func (s *Shadowsocks) Read(p []byte) (n int, err error) {
+func (s *ShadowConn) Read(p []byte) (n int, err error) {
 	if !s.readResponseHeaderOnce {
 		saltSize := len(s.enCipher.Salt)
 		headerBuf := make([]byte, 2*saltSize+27)
 		if _, err := io.ReadFull(s.Conn, headerBuf); err != nil {
 			return 0, err
 		}
-		
+
 		deCipher, err := sscrypto.NewCipherWithSalt(s.Method, s.enCipher.Key, headerBuf[:saltSize])
 		if err != nil {
 			return 0, err
 		}
 		s.deCipher = deCipher
-		
+
 		data, err := s.deCipher.Open(nil, headerBuf[saltSize:])
 		if err != nil {
 			slog.Error("SS outbound: response header decrypt failed", "error", err)
 			return 0, errors.New("shadowsocks: failed to open response fixed-length header")
 		}
-		
+
 		if data[0] != 1 {
 			return 0, errors.New("shadowsocks: invalid type in response fixed-length header")
 		}
-		
+
 		if !bytes.Equal(data[9:9+saltSize], s.enCipher.Salt) {
 			return 0, errors.New("shadowsocks: request salt mismatch in response header")
 		}
-		
+
 		vlLen := binary.BigEndian.Uint16(data[9+saltSize:])
 		if vlLen > 0 {
 			vlBuf := make([]byte, int(vlLen)+16)
@@ -112,48 +118,48 @@ func (s *Shadowsocks) Read(p []byte) (n int, err error) {
 			if err != nil {
 				return 0, errors.New("shadowsocks: failed to open response variable-length header")
 			}
-			
+
 			if len(vlData) > 0 {
 				s.readBuffer = append(s.readBuffer, vlData...)
 			}
 		}
-		
+
 		s.readResponseHeaderOnce = true
 	}
-	
+
 	if len(s.readBuffer) > 0 {
 		n = copy(p, s.readBuffer)
 		s.readBuffer = s.readBuffer[n:]
 		return n, nil
 	}
-	
+
 	chunkHeader := make([]byte, 18)
 	if _, err := io.ReadFull(s.Conn, chunkHeader); err != nil {
 		return 0, err
 	}
-	
+
 	lenBuf, err := s.deCipher.Open(nil, chunkHeader)
 	if err != nil {
 		slog.Error("SS outbound: chunk length decrypt failed", "error", err)
 		return 0, err
 	}
-	
+
 	payloadLen := int(binary.BigEndian.Uint16(lenBuf))
 	if payloadLen == 0 {
 		return 0, io.EOF
 	}
-	
+
 	fullPayloadBuf := make([]byte, payloadLen+16)
 	if _, err := io.ReadFull(s.Conn, fullPayloadBuf); err != nil {
 		return 0, err
 	}
-	
+
 	payload, err := s.deCipher.Open(nil, fullPayloadBuf)
 	if err != nil {
 		slog.Error("SS outbound: chunk payload decrypt failed", "error", err)
 		return 0, err
 	}
-	
+
 	n = copy(p, payload)
 	if n < len(payload) {
 		s.readBuffer = append(s.readBuffer, payload[n:]...)
@@ -161,9 +167,92 @@ func (s *Shadowsocks) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
-func (s *Shadowsocks) CloseWrite() error {
+func (s *ShadowConn) CloseWrite() error {
 	if tc, ok := s.Conn.(*net.TCPConn); ok {
 		return tc.CloseWrite()
 	}
 	return nil
+}
+
+type Session struct {
+	Addr        net.Addr
+	ID          []byte
+	Cipher      *sscrypto.Cipher
+	BlockCipher cipher.Block
+}
+
+func NewSession(addr net.Addr, method string, key []byte) (*Session, error) {
+	id := make([]byte, 8)
+	_, err := rand.Read(id)
+	if err != nil {
+		return nil, err
+	}
+
+	c, err := sscrypto.NewCipherWithSalt(method, key, id)
+	if err != nil {
+		return nil, err
+	}
+
+	bc, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+
+	s := &Session{
+		Addr:        addr,
+		ID:          id,
+		Cipher:      c,
+		BlockCipher: bc,
+	}
+	return s, nil
+}
+
+func (s *Session) SeparateHeader() []byte {
+	n := make([]byte, 12)
+	copy(n, s.ID[:8])
+	copy(n[8:], s.Cipher.Counter.Nonce())
+	return n
+}
+
+func (s *Session) MakeCTSMessage(data []byte) ([]byte, error) {
+	sh := s.SeparateHeader()
+	esh := make([]byte, 16)
+	s.BlockCipher.Encrypt(esh, sh)
+
+	header := make([]byte, 9)
+	header[0] = 0
+	binary.BigEndian.PutUint64(header, uint64(time.Now().Unix()))
+}
+
+func test() {
+	var SessionMap sync.Map
+
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	defer pc.Close()
+
+	buf := make([]byte, 65535)
+	for {
+		n, addr, err := pc.ReadFrom(buf)
+		if err != nil {
+			panic(err)
+		}
+
+		data, err := socks5.RemoveHeader(buf[:n])
+		if err != nil {
+			panic(err)
+		}
+
+		v, ok := SessionMap.Load(addr.String())
+		if !ok {
+			v, err = NewSession(nil, "", nil)
+			if err != nil {
+				panic(err)
+			}
+		}
+		session := v.(*Session)
+
+	}
 }

@@ -19,9 +19,9 @@ type HttpProxy struct {
 	ListenAddr string
 	ServerAddr string
 	Method     string
-	
+
 	Key []byte
-	
+
 	proxy     *httputil.ReverseProxy
 	proxyOnce sync.Once
 }
@@ -31,19 +31,19 @@ func (p *HttpProxy) Listen(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	
+
 	go func() {
 		<-ctx.Done()
 		ln.Close()
 	}()
-	
+
 	slog.Info("HTTP inbound listening", "addr", p.ListenAddr)
-	
+
 	srv := &http.Server{
 		Addr:    p.ListenAddr,
 		Handler: p,
 	}
-	
+
 	return srv.Serve(ln)
 }
 
@@ -53,9 +53,9 @@ func (p *HttpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if method == http.MethodConnect {
 		target = "https://" + target
 	}
-	
+
 	slog.Info("HTTP proxying", "method", method, "target", target, "client", req.RemoteAddr)
-	
+
 	if method == http.MethodConnect {
 		p.handleCONNECT(w, req)
 	} else {
@@ -71,15 +71,15 @@ func (p *HttpProxy) handleCONNECT(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Proxy error: invalid target address", http.StatusBadRequest)
 		return
 	}
-	
+
 	shadowConn, err := p.dialShadowsocks(targetAddr, nil)
 	if err != nil {
-		slog.Error("Dial Shadowsocks failed", "error", err)
+		slog.Error("Dial ShadowConn failed", "error", err)
 		http.Error(w, "Proxy error: connection failed", http.StatusBadGateway)
 		return
 	}
 	defer shadowConn.Close()
-	
+
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		slog.Error("Hijack failed: http.ResponseWriter is not a hijacker")
@@ -92,13 +92,13 @@ func (p *HttpProxy) handleCONNECT(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer clientConn.Close()
-	
+
 	_, err = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	if err != nil {
 		slog.Error("Send 200 Established failed", "error", err)
 		return
 	}
-	
+
 	tcp.Relay(context.Background(), clientConn, shadowConn)
 }
 
@@ -139,17 +139,17 @@ func (p *HttpProxy) initProxy() {
 	}
 }
 
-func (p *HttpProxy) dialShadowsocks(targetAddr *core.Address, initialPayload []byte) (*outbound.Shadowsocks, error) {
+func (p *HttpProxy) dialShadowsocks(targetAddr *core.Address, initialPayload []byte) (*outbound.ShadowConn, error) {
 	serverConn, err := net.DialTimeout("tcp", p.ServerAddr, time.Second*3)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	cipher, err := shadowsocks.NewCipher(p.Method, p.Key)
 	if err != nil {
 		serverConn.Close()
 		return nil, err
 	}
-	
-	return outbound.NewShadowsocks(serverConn, p.Method, cipher, targetAddr, initialPayload), nil
+
+	return outbound.NewShadowConn(serverConn, p.Method, cipher, targetAddr, initialPayload), nil
 }

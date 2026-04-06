@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	
+
 	"github.com/zeebo/blake3"
 	"golang.org/x/crypto/chacha20poly1305"
 )
@@ -20,7 +20,7 @@ type Counter struct {
 func (c *Counter) Count() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	for i := 0; i < 12; i++ {
 		c.buf[i]++
 		if c.buf[i] != 0 {
@@ -32,7 +32,7 @@ func (c *Counter) Count() {
 func (c *Counter) Nonce() []byte {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	nonce := make([]byte, 12)
 	copy(nonce, c.buf[:])
 	return nonce
@@ -51,7 +51,7 @@ func NewCipherWithSalt(method string, key, salt []byte) (*Cipher, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var aead cipher.AEAD
 	switch method {
 	case "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm":
@@ -72,7 +72,7 @@ func NewCipherWithSalt(method string, key, salt []byte) (*Cipher, error) {
 	default:
 		return nil, fmt.Errorf("unsupported method: %s", method)
 	}
-	
+
 	return &Cipher{
 		Method:  method,
 		Key:     key,
@@ -94,11 +94,11 @@ func NewCipher(method string, key []byte) (*Cipher, error) {
 	default:
 		return nil, fmt.Errorf("unsupported method: %s", method)
 	}
-	
+
 	if len(key) != saltSize {
 		return nil, errors.New("invalid key length for shadowsocks 2022")
 	}
-	
+
 	salt := make([]byte, saltSize)
 	if _, err := rand.Read(salt); err != nil {
 		return nil, err
@@ -112,10 +112,25 @@ func (c *Cipher) Seal(dst []byte, plaintext []byte) []byte {
 	return c.AEAD.Seal(dst, nonce, plaintext, nil)
 }
 
+func (c *Cipher) SealWithNonce(dst []byte, plaintext []byte, nonce []byte) []byte {
+	dst = c.AEAD.Seal(dst, nonce, plaintext, nil)
+	c.Counter.Count()
+	return dst
+}
+
 func (c *Cipher) Open(dst []byte, ciphertext []byte) ([]byte, error) {
 	nonce := c.Counter.Nonce()
 	c.Counter.Count()
 	return c.AEAD.Open(dst, nonce, ciphertext, nil)
+}
+
+func (c *Cipher) OpenWithNonce(dst []byte, ciphertext []byte, nonce []byte) ([]byte, error) {
+	dst, err := c.AEAD.Open(dst, nonce, ciphertext, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.Counter.Count()
+	return dst, nil
 }
 
 func Blake3DeriveKey(key, salt []byte) ([]byte, error) {

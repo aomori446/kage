@@ -20,7 +20,7 @@ var (
 type HandshakeResult struct {
 	TargetAddress *core.Address
 	Command       byte
-	
+
 	InitialPayload []byte
 }
 
@@ -29,27 +29,27 @@ func Handshake(conn net.Conn, associateBindAddr string, fastOpen bool) (*Handsha
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse associate addr: %w", err)
 	}
-	
+
 	if err = auth(conn); err != nil {
 		return nil, err
 	}
-	
+
 	b := make([]byte, 3)
 	if _, err = io.ReadFull(conn, b); err != nil {
 		return nil, fmt.Errorf("failed to read request header: %w", err)
 	}
-	
+
 	if b[0] != 0x05 {
 		return nil, ErrVersionNotSupported
 	}
-	
+
 	switch b[1] {
-	case 0x01, 0x03:
+	case 0x01, 0x03: // 0x01 Connect, 0x03 UDP Associate
 	default:
-		conn.Write([]byte{0x05, 0x07, 0x00, byte(core.AtypIPV4), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+		conn.Write([]byte{0x05, 0x07, 0x00, byte(core.AtypIPV4), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}) // 0x07 Command not supported
 		return nil, ErrCommandNotSupported
 	}
-	
+
 	addr, err := core.ReadAddress(conn)
 	if errors.Is(err, core.ErrAddressTypeNotSupported) {
 		conn.Write([]byte{0x05, 0x08, 0x00, byte(core.AtypIPV4), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
@@ -58,24 +58,24 @@ func Handshake(conn net.Conn, associateBindAddr string, fastOpen bool) (*Handsha
 	if err != nil {
 		return nil, fmt.Errorf("failed to read target address: %w", err)
 	}
-	
-	if b[1] == 0x01 {
+
+	if b[1] == 0x01 { // Connect
 		_, err = conn.Write(append([]byte{0x05, 0x00, 0x00}, core.EmptyAddress().Bytes()...))
 		if err != nil {
 			return nil, fmt.Errorf("failed to write connect response: %w", err)
 		}
-	} else {
+	} else { // UDP Associate
 		_, err = conn.Write(append([]byte{0x05, 0x00, 0x00}, associateAddress.Bytes()...))
 		if err != nil {
 			return nil, fmt.Errorf("failed to write associate response: %w", err)
 		}
 	}
-	
+
 	result := &HandshakeResult{
 		TargetAddress: addr,
 		Command:       b[1],
 	}
-	
+
 	if fastOpen {
 		payload, err := readInitialPayload(conn)
 		if err != nil {
@@ -83,7 +83,7 @@ func Handshake(conn net.Conn, associateBindAddr string, fastOpen bool) (*Handsha
 		}
 		result.InitialPayload = payload
 	}
-	
+
 	return result, nil
 }
 
@@ -92,14 +92,14 @@ func readInitialPayload(conn net.Conn) ([]byte, error) {
 		return nil, err
 	}
 	defer conn.SetDeadline(time.Time{})
-	
+
 	buf := make([]byte, 32*1024)
 	n, err := conn.Read(buf)
-	
+
 	if n > 0 {
 		return buf[:n], nil
 	}
-	
+
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) && netErr.Timeout() {
@@ -107,7 +107,7 @@ func readInitialPayload(conn net.Conn) ([]byte, error) {
 		}
 		return nil, err
 	}
-	
+
 	return nil, nil
 }
 
@@ -116,7 +116,7 @@ func auth(conn net.Conn) error {
 		return err
 	}
 	defer conn.SetDeadline(time.Time{})
-	
+
 	buf := make([]byte, 255)
 	if _, err := io.ReadFull(conn, buf[:2]); err != nil {
 		if errors.Is(err, io.EOF) {
@@ -124,29 +124,29 @@ func auth(conn net.Conn) error {
 		}
 		return fmt.Errorf("failed to read auth header: %w", err)
 	}
-	
+
 	if buf[0] != 0x05 {
 		return fmt.Errorf("%w: got %d", ErrVersionNotSupported, buf[0])
 	}
-	
+
 	nMethods := int(buf[1])
 	if nMethods < 1 {
 		return ErrMethodsCount
 	}
-	
+
 	if _, err := io.ReadFull(conn, buf[:nMethods]); err != nil {
 		return fmt.Errorf("failed to read auth methods: %w", err)
 	}
-	
+
 	if !slices.Contains(buf[:nMethods], 0x00) {
 		conn.Write([]byte{0x05, 0xFF})
 		return ErrNoAcceptableMethods
 	}
-	
+
 	var err error
 	if _, err = conn.Write([]byte{0x05, 0x00}); err != nil {
 		return fmt.Errorf("failed to write auth response: %w", err)
 	}
-	
+
 	return nil
 }
