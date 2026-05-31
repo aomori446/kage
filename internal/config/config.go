@@ -12,6 +12,7 @@ type InboundConfig struct {
 	Listen   string `json:"listen"`
 	Target   string `json:"target"`
 	FastOpen bool   `json:"fast_open"`
+	UDP      bool   `json:"udp"`
 }
 
 type Config struct {

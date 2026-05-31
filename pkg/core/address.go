@@ -156,3 +156,46 @@ func EmptyAddress() *Address {
 		Port: 0,
 	}
 }
+
+func ReadAddressFromBytes(b []byte) (*Address, error) {
+	if len(b) < 1 {
+		return nil, io.ErrUnexpectedEOF
+	}
+	atyp := AddressType(b[0])
+	var host []byte
+	var offset int
+	
+	switch atyp {
+	case AtypIPV4:
+		if len(b) < 1+net.IPv4len+2 {
+			return nil, io.ErrUnexpectedEOF
+		}
+		host = b[1 : 1+net.IPv4len]
+		offset = 1 + net.IPv4len
+	case AtypIPV6:
+		if len(b) < 1+net.IPv6len+2 {
+			return nil, io.ErrUnexpectedEOF
+		}
+		host = b[1 : 1+net.IPv6len]
+		offset = 1 + net.IPv6len
+	case AtypDomainName:
+		if len(b) < 2 {
+			return nil, io.ErrUnexpectedEOF
+		}
+		domainLen := int(b[1])
+		if len(b) < 1+1+domainLen+2 {
+			return nil, io.ErrUnexpectedEOF
+		}
+		host = b[2 : 2+domainLen]
+		offset = 2 + domainLen
+	default:
+		return nil, ErrAddressTypeNotSupported
+	}
+	
+	port := binary.BigEndian.Uint16(b[offset : offset+2])
+	return &Address{
+		Type: atyp,
+		Host: host,
+		Port: port,
+	}, nil
+}

@@ -39,11 +39,12 @@ func (c *Counter) Nonce() []byte {
 }
 
 type Cipher struct {
-	Method  string
-	Key     []byte
-	Salt    []byte
-	Counter *Counter
-	AEAD    cipher.AEAD
+	Method      string
+	Key         []byte
+	Salt        []byte
+	Counter     *Counter
+	AEAD        cipher.AEAD
+	BlockCipher cipher.Block
 }
 
 func NewCipherWithSalt(method string, key, salt []byte) (*Cipher, error) {
@@ -53,9 +54,11 @@ func NewCipherWithSalt(method string, key, salt []byte) (*Cipher, error) {
 	}
 	
 	var aead cipher.AEAD
+	var block cipher.Block
 	switch method {
 	case "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm":
-		block, err := aes.NewCipher(sessionSubkey)
+		var err error
+		block, err = aes.NewCipher(sessionSubkey)
 		if err != nil {
 			return nil, err
 		}
@@ -74,11 +77,12 @@ func NewCipherWithSalt(method string, key, salt []byte) (*Cipher, error) {
 	}
 	
 	return &Cipher{
-		Method:  method,
-		Key:     key,
-		Salt:    salt,
-		Counter: new(Counter),
-		AEAD:    aead,
+		Method:      method,
+		Key:         key,
+		Salt:        salt,
+		Counter:     new(Counter),
+		AEAD:        aead,
+		BlockCipher: block,
 	}, nil
 }
 
@@ -116,6 +120,10 @@ func (c *Cipher) Open(dst []byte, ciphertext []byte) ([]byte, error) {
 	nonce := c.Counter.Nonce()
 	c.Counter.Count()
 	return c.AEAD.Open(dst, nonce, ciphertext, nil)
+}
+
+func NewBlockCipher(key []byte) (cipher.Block, error) {
+	return aes.NewCipher(key)
 }
 
 func Blake3DeriveKey(key, salt []byte) ([]byte, error) {

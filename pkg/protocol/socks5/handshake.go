@@ -24,18 +24,13 @@ type HandshakeResult struct {
 	InitialPayload []byte
 }
 
-func Handshake(conn net.Conn, associateBindAddr string, fastOpen bool) (*HandshakeResult, error) {
-	associateAddress, err := core.ParseAddress(associateBindAddr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse associate addr: %w", err)
-	}
-	
-	if err = auth(conn); err != nil {
+func Handshake(conn net.Conn, fastOpen bool) (*HandshakeResult, error) {
+	if err := auth(conn); err != nil {
 		return nil, err
 	}
 	
 	b := make([]byte, 3)
-	if _, err = io.ReadFull(conn, b); err != nil {
+	if _, err := io.ReadFull(conn, b); err != nil {
 		return nil, fmt.Errorf("failed to read request header: %w", err)
 	}
 	
@@ -59,24 +54,12 @@ func Handshake(conn net.Conn, associateBindAddr string, fastOpen bool) (*Handsha
 		return nil, fmt.Errorf("failed to read target address: %w", err)
 	}
 	
-	if b[1] == 0x01 {
-		_, err = conn.Write(append([]byte{0x05, 0x00, 0x00}, core.EmptyAddress().Bytes()...))
-		if err != nil {
-			return nil, fmt.Errorf("failed to write connect response: %w", err)
-		}
-	} else {
-		_, err = conn.Write(append([]byte{0x05, 0x00, 0x00}, associateAddress.Bytes()...))
-		if err != nil {
-			return nil, fmt.Errorf("failed to write associate response: %w", err)
-		}
-	}
-	
 	result := &HandshakeResult{
 		TargetAddress: addr,
 		Command:       b[1],
 	}
 	
-	if fastOpen {
+	if fastOpen && b[1] == 0x01 {
 		payload, err := readInitialPayload(conn)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read initial payload: %w", err)
@@ -85,6 +68,11 @@ func Handshake(conn net.Conn, associateBindAddr string, fastOpen bool) (*Handsha
 	}
 	
 	return result, nil
+}
+
+func SendResponse(conn net.Conn, addr *core.Address) error {
+	_, err := conn.Write(append([]byte{0x05, 0x00, 0x00}, addr.Bytes()...))
+	return err
 }
 
 func readInitialPayload(conn net.Conn) ([]byte, error) {

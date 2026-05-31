@@ -52,6 +52,7 @@ func main() {
 					Method:     cfg.Method,
 					Key:        cfg.Key,
 					FastOpen:   in.FastOpen,
+					UDP:        in.UDP,
 				}
 				err = s.Listen(ctx)
 			case "tunnel":

@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/kage2.iml" filepath="$PROJECT_DIR$/.idea/kage2.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/kage.iml" filepath="$PROJECT_DIR$/.idea/kage.iml" />
     </modules>
   </component>
 </project>
