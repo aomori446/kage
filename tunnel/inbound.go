@@ -1,17 +1,15 @@
-package inbound
+package tunnel
 
 import (
 	"context"
-	"kage/pkg/core"
-	"kage/pkg/crypto/shadowsocks"
-	"kage/pkg/proxy/outbound"
-	"kage/pkg/transport/tcp"
+	"kage/core"
+	"kage/shadowsocks"
 	"log/slog"
 	"net"
 	"time"
 )
 
-type Tunnel struct {
+type Inbound struct {
 	ListenAddr string
 	ServerAddr string
 	Method     string
@@ -20,7 +18,7 @@ type Tunnel struct {
 	Key []byte
 }
 
-func (t *Tunnel) Listen(ctx context.Context) error {
+func (t *Inbound) Listen(ctx context.Context) error {
 	ln, err := net.Listen("tcp", t.ListenAddr)
 	if err != nil {
 		return err
@@ -53,7 +51,7 @@ func (t *Tunnel) Listen(ctx context.Context) error {
 	}
 }
 
-func (t *Tunnel) handle(ctx context.Context, clientConn net.Conn) error {
+func (t *Inbound) handle(ctx context.Context, clientConn net.Conn) error {
 	defer clientConn.Close()
 	
 	serverConn, err := net.DialTimeout("tcp", t.ServerAddr, time.Second*3)
@@ -74,9 +72,9 @@ func (t *Tunnel) handle(ctx context.Context, clientConn net.Conn) error {
 	
 	slog.Debug("Tunnel connecting", "remote", clientConn.RemoteAddr(), "target", targetAddr)
 	
-	shadowConn := outbound.NewShadowsocks(serverConn, t.Method, cipher, targetAddr, nil)
+	shadowConn := shadowsocks.NewConn(serverConn, t.Method, cipher, targetAddr, nil)
 	defer shadowConn.Close()
 	
-	tcp.Relay(ctx, clientConn, shadowConn)
+	core.TCPRelay(ctx, clientConn, shadowConn)
 	return nil
 }

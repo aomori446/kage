@@ -1,4 +1,4 @@
-package logger
+package main
 
 import (
 	"log/slog"
@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func Init(level string) {
+func InitLogger(level string) {
 	var l slog.Level
 	switch strings.ToLower(level) {
 	case "debug":

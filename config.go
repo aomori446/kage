@@ -1,4 +1,4 @@
-package config
+package main
 
 import (
 	"encoding/base64"
@@ -30,17 +30,18 @@ func LoadConfig(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config: %w", err)
 	}
-	
+
 	var cfg Config
 	if err = json.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
-	
+
 	key, err := base64.StdEncoding.DecodeString(cfg.Password)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode password: %w", err)
 	}
 	cfg.Key = key
-	
+
 	return &cfg, nil
 }
+

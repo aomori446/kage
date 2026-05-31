@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 	"flag"
-	"kage/internal/config"
-	"kage/internal/logger"
-	"kage/pkg/proxy/inbound"
+	"kage/http"
+	"kage/socks5"
+	"kage/tunnel"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -17,13 +17,13 @@ func main() {
 	configPath := flag.String("c", "config.json", "Config file path")
 	flag.Parse()
 	
-	cfg, err := config.LoadConfig(*configPath)
+	cfg, err := LoadConfig(*configPath)
 	if err != nil {
 		slog.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
 	
-	logger.Init(cfg.LogLevel)
+	InitLogger(cfg.LogLevel)
 	
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -40,13 +40,13 @@ func main() {
 	for _, in := range cfg.Inbounds {
 		wg.Add(1)
 		
-		go func(in config.InboundConfig) {
+		go func(in InboundConfig) {
 			defer wg.Done()
 			
 			var err error
 			switch in.Type {
 			case "socks5":
-				s := &inbound.Socks5{
+				s := &socks5.Inbound{
 					ListenAddr: in.Listen,
 					ServerAddr: cfg.Server,
 					Method:     cfg.Method,
@@ -56,7 +56,7 @@ func main() {
 				}
 				err = s.Listen(ctx)
 			case "tunnel":
-				t := &inbound.Tunnel{
+				t := &tunnel.Inbound{
 					ListenAddr: in.Listen,
 					ServerAddr: cfg.Server,
 					Method:     cfg.Method,
@@ -65,7 +65,7 @@ func main() {
 				}
 				err = t.Listen(ctx)
 			case "http":
-				h := &inbound.HttpProxy{
+				h := &http.Inbound{
 					ListenAddr: in.Listen,
 					ServerAddr: cfg.Server,
 					Method:     cfg.Method,

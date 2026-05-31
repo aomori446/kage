@@ -1,22 +1,18 @@
-package inbound
+package socks5
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"kage/pkg/core"
-	sscrypto "kage/pkg/crypto/shadowsocks"
-	"kage/pkg/protocol/socks5"
-	"kage/pkg/proxy/outbound"
-	"kage/pkg/transport/tcp"
-	udprelay "kage/pkg/transport/udp"
+	"kage/core"
+	"kage/shadowsocks"
 	"log/slog"
 	"net"
 	"time"
 )
 
-type Socks5 struct {
+type Inbound struct {
 	ListenAddr string
 	ServerAddr string
 	Method     string
@@ -25,7 +21,7 @@ type Socks5 struct {
 	UDP        bool
 }
 
-func (s *Socks5) Listen(ctx context.Context) error {
+func (s *Inbound) Listen(ctx context.Context) error {
 	ln, err := net.Listen("tcp", s.ListenAddr)
 	if err != nil {
 		return err
@@ -62,10 +58,10 @@ func (s *Socks5) Listen(ctx context.Context) error {
 	}
 }
 
-func (s *Socks5) handle(ctx context.Context, clientConn net.Conn) error {
+func (s *Inbound) handle(ctx context.Context, clientConn net.Conn) error {
 	defer clientConn.Close()
 	
-	handshakeRes, err := socks5.Handshake(clientConn, s.FastOpen)
+	handshakeRes, err := Handshake(clientConn, s.FastOpen)
 	if err != nil {
 		return err
 	}
@@ -78,7 +74,7 @@ func (s *Socks5) handle(ctx context.Context, clientConn net.Conn) error {
 		return s.handleUDP(ctx, clientConn)
 	}
 	
-	if err = socks5.SendResponse(clientConn, core.EmptyAddress()); err != nil {
+	if err = SendResponse(clientConn, core.EmptyAddress()); err != nil {
 		return err
 	}
 	
@@ -89,13 +85,13 @@ func (s *Socks5) handle(ctx context.Context, clientConn net.Conn) error {
 	
 	slog.Info("SOCKS5 proxying", "client", clientConn.RemoteAddr(), "remote", serverConn.RemoteAddr(), "target", handshakeRes.TargetAddress)
 	
-	cipher, err := sscrypto.NewCipher(s.Method, s.Key)
+	cipher, err := shadowsocks.NewCipher(s.Method, s.Key)
 	if err != nil {
 		serverConn.Close()
 		return err
 	}
 	
-	shadowConn := outbound.NewShadowsocks(
+	shadowConn := shadowsocks.NewConn(
 		serverConn,
 		s.Method,
 		cipher,
@@ -108,11 +104,11 @@ func (s *Socks5) handle(ctx context.Context, clientConn net.Conn) error {
 		return err
 	}
 	
-	tcp.Relay(ctx, clientConn, shadowConn)
+	core.TCPRelay(ctx, clientConn, shadowConn)
 	return nil
 }
 
-func (s *Socks5) handleUDP(ctx context.Context, clientConn net.Conn) error {
+func (s *Inbound) handleUDP(ctx context.Context, clientConn net.Conn) error {
 	slog.Info("SOCKS5 UDP Associate", "client", clientConn.RemoteAddr())
 	
 	lnAddr, err := net.ResolveUDPAddr("udp", ":0")
@@ -132,11 +128,11 @@ func (s *Socks5) handleUDP(ctx context.Context, clientConn net.Conn) error {
 		return err
 	}
 	
-	if err = socks5.SendResponse(clientConn, associateAddr); err != nil {
+	if err = SendResponse(clientConn, associateAddr); err != nil {
 		return err
 	}
 	
-	ssOut, err := outbound.NewShadowsocksUDP(s.Method, s.Key, s.ServerAddr)
+	ssOut, err := shadowsocks.NewUDP(s.Method, s.Key, s.ServerAddr)
 	if err != nil {
 		return err
 	}
@@ -150,5 +146,5 @@ func (s *Socks5) handleUDP(ctx context.Context, clientConn net.Conn) error {
 		cancel()
 	}()
 	
-	return udprelay.Relay(relayCtx, inConn, ssOut)
+	return core.UDPRelay(relayCtx, inConn, ssOut)
 }

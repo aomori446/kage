@@ -2,7 +2,7 @@ package socks5
 
 import (
 	"errors"
-	"kage/pkg/core"
+	"kage/core"
 )
 
 var (
@@ -29,6 +29,7 @@ func (d Datagram) Address() (*core.Address, error) {
 }
 
 func (d Datagram) Payload() []byte {
+	// Skip RSV(2), FRAG(1) and Address
 	atyp := core.AddressType(d[3])
 	offset := 4
 	switch atyp {
@@ -80,3 +81,4 @@ func ParseDatagram(b []byte) (addr *core.Address, payload []byte, err error) {
 	}
 	return addr, d.Payload(), nil
 }
+

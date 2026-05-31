@@ -1,12 +1,10 @@
-package inbound
+package http
 
 import (
 	"context"
 	"errors"
-	"kage/pkg/core"
-	"kage/pkg/crypto/shadowsocks"
-	"kage/pkg/proxy/outbound"
-	"kage/pkg/transport/tcp"
+	"kage/core"
+	"kage/shadowsocks"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,7 +13,7 @@ import (
 	"time"
 )
 
-type HttpProxy struct {
+type Inbound struct {
 	ListenAddr string
 	ServerAddr string
 	Method     string
@@ -26,7 +24,7 @@ type HttpProxy struct {
 	proxyOnce sync.Once
 }
 
-func (p *HttpProxy) Listen(ctx context.Context) error {
+func (p *Inbound) Listen(ctx context.Context) error {
 	ln, err := net.Listen("tcp", p.ListenAddr)
 	if err != nil {
 		return err
@@ -47,7 +45,7 @@ func (p *HttpProxy) Listen(ctx context.Context) error {
 	return srv.Serve(ln)
 }
 
-func (p *HttpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (p *Inbound) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	target := req.RequestURI
 	method := req.Method
 	if method == http.MethodConnect {
@@ -64,7 +62,7 @@ func (p *HttpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (p *HttpProxy) handleCONNECT(w http.ResponseWriter, req *http.Request) {
+func (p *Inbound) handleCONNECT(w http.ResponseWriter, req *http.Request) {
 	targetAddr, err := core.ParseAddress(req.Host)
 	if err != nil {
 		slog.Error("Parse target address failed", "host", req.Host, "error", err)
@@ -99,10 +97,10 @@ func (p *HttpProxy) handleCONNECT(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	
-	tcp.Relay(context.Background(), clientConn, shadowConn)
+	core.TCPRelay(context.Background(), clientConn, shadowConn)
 }
 
-func (p *HttpProxy) initProxy() {
+func (p *Inbound) initProxy() {
 	p.proxy = &httputil.ReverseProxy{
 		Director: func(outReq *http.Request) {
 			outReq.URL.Scheme = "http"
@@ -139,7 +137,7 @@ func (p *HttpProxy) initProxy() {
 	}
 }
 
-func (p *HttpProxy) dialShadowsocks(targetAddr *core.Address, initialPayload []byte) (*outbound.Shadowsocks, error) {
+func (p *Inbound) dialShadowsocks(targetAddr *core.Address, initialPayload []byte) (*shadowsocks.Conn, error) {
 	serverConn, err := net.DialTimeout("tcp", p.ServerAddr, time.Second*3)
 	if err != nil {
 		return nil, err
@@ -151,5 +149,5 @@ func (p *HttpProxy) dialShadowsocks(targetAddr *core.Address, initialPayload []b
 		return nil, err
 	}
 	
-	return outbound.NewShadowsocks(serverConn, p.Method, cipher, targetAddr, initialPayload), nil
+	return shadowsocks.NewConn(serverConn, p.Method, cipher, targetAddr, initialPayload), nil
 }

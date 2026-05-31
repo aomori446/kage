@@ -1,4 +1,4 @@
-package outbound
+package shadowsocks
 
 import (
 	"crypto/cipher"
@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	sscrypto "kage/pkg/crypto/shadowsocks"
 	"math/big"
 	"net"
 	"sync"
@@ -22,7 +21,7 @@ var (
 
 type UDPSession struct {
 	ID     []byte
-	Cipher *sscrypto.Cipher
+	Cipher *Cipher
 }
 
 func NewUDPSession(method string, psk []byte) (*UDPSession, error) {
@@ -31,7 +30,7 @@ func NewUDPSession(method string, psk []byte) (*UDPSession, error) {
 		return nil, fmt.Errorf("generate session id: %w", err)
 	}
 	
-	cipher, err := sscrypto.NewCipherWithSalt(method, psk, id)
+	cipher, err := NewCipherWithSalt(method, psk, id)
 	if err != nil {
 		return nil, fmt.Errorf("create session cipher: %w", err)
 	}
@@ -50,7 +49,7 @@ func (s *UDPSession) SeparateHeader() []byte {
 	return sh
 }
 
-type ShadowsocksUDP struct {
+type UDP struct {
 	Method      string
 	PSK         []byte
 	BlockCipher cipher.Block
@@ -65,8 +64,8 @@ type ShadowsocksUDP struct {
 	clientSessionIDs sync.Map
 }
 
-func NewShadowsocksUDP(method string, psk []byte, serverAddr string) (*ShadowsocksUDP, error) {
-	block, err := sscrypto.NewBlockCipher(psk)
+func NewUDP(method string, psk []byte, serverAddr string) (*UDP, error) {
+	block, err := NewBlockCipher(psk)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +75,7 @@ func NewShadowsocksUDP(method string, psk []byte, serverAddr string) (*Shadowsoc
 		return nil, err
 	}
 	
-	return &ShadowsocksUDP{
+	return &UDP{
 		Method:      method,
 		PSK:         psk,
 		BlockCipher: block,
@@ -84,7 +83,11 @@ func NewShadowsocksUDP(method string, psk []byte, serverAddr string) (*Shadowsoc
 	}, nil
 }
 
-func (s *ShadowsocksUDP) Pack(clientAddr *net.UDPAddr, data []byte) ([]byte, error) {
+func (s *UDP) GetServerAddr() *net.UDPAddr {
+    return s.ServerAddr
+}
+
+func (s *UDP) Pack(clientAddr *net.UDPAddr, data []byte) ([]byte, error) {
 	session, err := s.getOrCreateClientSession(clientAddr)
 	if err != nil {
 		return nil, err
@@ -111,7 +114,7 @@ func (s *ShadowsocksUDP) Pack(clientAddr *net.UDPAddr, data []byte) ([]byte, err
 	return append(enSeparateHeader, enBody...), nil
 }
 
-func (s *ShadowsocksUDP) Unpack(payload []byte) ([]byte, *net.UDPAddr, error) {
+func (s *UDP) Unpack(payload []byte) ([]byte, *net.UDPAddr, error) {
 	if len(payload) < 16 {
 		return nil, nil, ErrPayloadTooShort
 	}
@@ -146,7 +149,7 @@ func (s *ShadowsocksUDP) Unpack(payload []byte) ([]byte, *net.UDPAddr, error) {
 	return body, v.(*net.UDPAddr), nil
 }
 
-func (s *ShadowsocksUDP) getOrCreateClientSession(addr *net.UDPAddr) (*UDPSession, error) {
+func (s *UDP) getOrCreateClientSession(addr *net.UDPAddr) (*UDPSession, error) {
 	key := addr.String()
 	if v, ok := s.clientSessions.Load(key); ok {
 		return v.(*UDPSession), nil
@@ -162,13 +165,13 @@ func (s *ShadowsocksUDP) getOrCreateClientSession(addr *net.UDPAddr) (*UDPSessio
 	return session, nil
 }
 
-func (s *ShadowsocksUDP) getOrCreateServerCipher(sessionID []byte) (*sscrypto.Cipher, error) {
+func (s *UDP) getOrCreateServerCipher(sessionID []byte) (*Cipher, error) {
 	key := string(sessionID)
 	if v, ok := s.serverSessions.Load(key); ok {
-		return v.(*sscrypto.Cipher), nil
+		return v.(*Cipher), nil
 	}
 	
-	cipher, err := sscrypto.NewCipherWithSalt(s.Method, s.PSK, sessionID)
+	cipher, err := NewCipherWithSalt(s.Method, s.PSK, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +180,7 @@ func (s *ShadowsocksUDP) getOrCreateServerCipher(sessionID []byte) (*sscrypto.Ci
 	return cipher, nil
 }
 
-func (s *ShadowsocksUDP) buildMessageHeader() ([]byte, error) {
+func (s *UDP) buildMessageHeader() ([]byte, error) {
 	mh := []byte{0x00} // Type: Client-to-Server
 	
 	timestamp := make([]byte, 8)
@@ -198,7 +201,7 @@ func (s *ShadowsocksUDP) buildMessageHeader() ([]byte, error) {
 	return append(mh, padding...), nil
 }
 
-func (s *ShadowsocksUDP) resolveBody(deBody []byte) ([]byte, []byte, error) {
+func (s *UDP) resolveBody(deBody []byte) ([]byte, []byte, error) {
 	if len(deBody) < 1 {
 		return nil, nil, ErrPayloadTooShort
 	}

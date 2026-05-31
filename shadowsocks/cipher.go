@@ -44,7 +44,7 @@ type Cipher struct {
 	Salt        []byte
 	Counter     *Counter
 	AEAD        cipher.AEAD
-	BlockCipher cipher.Block
+	BlockCipher cipher.Block // For Shadowsocks 2022 UDP separate header
 }
 
 func NewCipherWithSalt(method string, key, salt []byte) (*Cipher, error) {

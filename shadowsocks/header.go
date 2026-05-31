@@ -3,7 +3,7 @@ package shadowsocks
 import (
 	crand "crypto/rand"
 	"encoding/binary"
-	"kage/pkg/core"
+	"kage/core"
 	"math/rand/v2"
 	"time"
 )

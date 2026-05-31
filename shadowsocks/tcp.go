@@ -1,23 +1,21 @@
-package outbound
+package shadowsocks
 
 import (
 	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
-	"kage/pkg/core"
-	sscrypto "kage/pkg/crypto/shadowsocks"
-	ssproto "kage/pkg/protocol/shadowsocks"
+	"kage/core"
 	"log/slog"
 	"net"
 )
 
-type Shadowsocks struct {
+type Conn struct {
 	net.Conn
 	
 	Method   string
-	enCipher *sscrypto.Cipher
-	deCipher *sscrypto.Cipher
+	enCipher *Cipher
+	deCipher *Cipher
 	
 	readBuffer []byte
 	
@@ -28,8 +26,8 @@ type Shadowsocks struct {
 	initialPayload []byte
 }
 
-func NewShadowsocks(conn net.Conn, method string, enCipher *sscrypto.Cipher, targetAddr *core.Address, initialPayload []byte) *Shadowsocks {
-	return &Shadowsocks{
+func NewConn(conn net.Conn, method string, enCipher *Cipher, targetAddr *core.Address, initialPayload []byte) *Conn {
+	return &Conn{
 		Conn:     conn,
 		Method:   method,
 		enCipher: enCipher,
@@ -45,10 +43,10 @@ func NewShadowsocks(conn net.Conn, method string, enCipher *sscrypto.Cipher, tar
 	}
 }
 
-func (s *Shadowsocks) Write(p []byte) (n int, err error) {
+func (s *Conn) Write(p []byte) (n int, err error) {
 	var buf []byte
 	if !s.writeRequestHeaderOnce {
-		flHeader, vlHeader, err := ssproto.PackRequestHeader(s.targetAddr, s.initialPayload)
+		flHeader, vlHeader, err := PackRequestHeader(s.targetAddr, s.initialPayload)
 		if err != nil {
 			return 0, err
 		}
@@ -74,7 +72,7 @@ func (s *Shadowsocks) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-func (s *Shadowsocks) Read(p []byte) (n int, err error) {
+func (s *Conn) Read(p []byte) (n int, err error) {
 	if !s.readResponseHeaderOnce {
 		saltSize := len(s.enCipher.Salt)
 		headerBuf := make([]byte, 2*saltSize+27)
@@ -82,7 +80,7 @@ func (s *Shadowsocks) Read(p []byte) (n int, err error) {
 			return 0, err
 		}
 		
-		deCipher, err := sscrypto.NewCipherWithSalt(s.Method, s.enCipher.Key, headerBuf[:saltSize])
+		deCipher, err := NewCipherWithSalt(s.Method, s.enCipher.Key, headerBuf[:saltSize])
 		if err != nil {
 			return 0, err
 		}
@@ -161,7 +159,7 @@ func (s *Shadowsocks) Read(p []byte) (n int, err error) {
 	return n, nil
 }
 
-func (s *Shadowsocks) CloseWrite() error {
+func (s *Conn) CloseWrite() error {
 	if tc, ok := s.Conn.(*net.TCPConn); ok {
 		return tc.CloseWrite()
 	}

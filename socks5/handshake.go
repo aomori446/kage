@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"kage/pkg/core"
+	"kage/core"
 	"net"
 	"slices"
 	"time"

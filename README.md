@@ -26,7 +26,23 @@ git clone https://github.com/aomori446/kage.git
 cd kage
 
 # クライアントのビルド
-go build -o kage ./cmd/kage-client
+go build -o kage .
+```
+
+## プロジェクト構造
+
+本プロジェクトは、メンテナンス性と拡張性を考慮した 2 層のディレクトリ構造を採用しています。
+
+```text
+/kage/
+├── main.go            # エントリポイント
+├── config.go          # 設定読み込み
+├── logger.go          # ログ初期化
+├── core/              # 共通基盤 (Address, Relay)
+├── shadowsocks/       # Shadowsocks プロトコル実装
+├── socks5/            # SOCKS5 プロトコル実装
+├── http/              # HTTP プロキシ実装
+└── tunnel/            # TCP トンネル実装
 ```
 
 ## 使い方
