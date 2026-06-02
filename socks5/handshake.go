@@ -41,13 +41,13 @@ func Handshake(conn net.Conn, fastOpen bool) (*HandshakeResult, error) {
 	switch b[1] {
 	case 0x01, 0x03:
 	default:
-		conn.Write([]byte{0x05, 0x07, 0x00, byte(core.AtypIPV4), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+		conn.Write([]byte{0x05, 0x07, 0x00, byte(core.AtypIPv4), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
 		return nil, ErrCommandNotSupported
 	}
 	
 	addr, err := core.ReadAddress(conn)
 	if errors.Is(err, core.ErrAddressTypeNotSupported) {
-		conn.Write([]byte{0x05, 0x08, 0x00, byte(core.AtypIPV4), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+		conn.Write([]byte{0x05, 0x08, 0x00, byte(core.AtypIPv4), 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
 		return nil, core.ErrAddressTypeNotSupported
 	}
 	if err != nil {
@@ -70,8 +70,18 @@ func Handshake(conn net.Conn, fastOpen bool) (*HandshakeResult, error) {
 	return result, nil
 }
 
-func SendResponse(conn net.Conn, addr *core.Address) error {
-	_, err := conn.Write(append([]byte{0x05, 0x00, 0x00}, addr.Bytes()...))
+func SendResponse(conn net.Conn, addr string) (err error) {
+	var address *core.Address
+	if addr == "" {
+		address = core.EmptyAddress()
+	} else {
+		address, err = core.ParseAddress(addr)
+		if err != nil {
+			return err
+		}
+	}
+	
+	_, err = conn.Write(append([]byte{0x05, 0x00, 0x00}, address.Bytes()...))
 	return err
 }
 

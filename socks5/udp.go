@@ -33,31 +33,17 @@ func (d Datagram) Payload() []byte {
 	atyp := core.AddressType(d[3])
 	offset := 4
 	switch atyp {
-	case core.AtypIPV4:
+	case core.AtypIPv4:
 		offset += 4 + 2
 	case core.AtypDomainName:
 		domainLen := int(d[4])
 		offset += 1 + domainLen + 2
-	case core.AtypIPV6:
+	case core.AtypIPv6:
 		offset += 16 + 2
 	}
 	return d[offset:]
 }
 
-func (d Datagram) TrimHead() []byte {
-	atyp := core.AddressType(d[3])
-	offset := 4
-	switch atyp {
-	case core.AtypIPV4:
-		offset += 4 + 2
-	case core.AtypDomainName:
-		domainLen := int(d[4])
-		offset += 1 + domainLen + 2
-	case core.AtypIPV6:
-		offset += 16 + 2
-	}
-	return d[offset:]
-}
 
 func PackDatagram(addr *core.Address, payload []byte) []byte {
 	addrBytes := addr.Bytes()

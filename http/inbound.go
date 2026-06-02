@@ -17,14 +17,16 @@ type Inbound struct {
 	ListenAddr string
 	ServerAddr string
 	Method     string
-	
+
 	Key []byte
-	
+
+	ctx       context.Context
 	proxy     *httputil.ReverseProxy
 	proxyOnce sync.Once
 }
 
 func (p *Inbound) Listen(ctx context.Context) error {
+	p.ctx = ctx
 	ln, err := net.Listen("tcp", p.ListenAddr)
 	if err != nil {
 		return err
@@ -97,7 +99,7 @@ func (p *Inbound) handleCONNECT(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	
-	core.TCPRelay(context.Background(), clientConn, shadowConn)
+	core.TCPRelay(p.ctx, clientConn, shadowConn)
 }
 
 func (p *Inbound) initProxy() {
@@ -143,11 +145,5 @@ func (p *Inbound) dialShadowsocks(targetAddr *core.Address, initialPayload []byt
 		return nil, err
 	}
 	
-	cipher, err := shadowsocks.NewCipher(p.Method, p.Key)
-	if err != nil {
-		serverConn.Close()
-		return nil, err
-	}
-	
-	return shadowsocks.NewConn(serverConn, p.Method, cipher, targetAddr, initialPayload), nil
+	return shadowsocks.NewConn(serverConn, p.Method, p.Key, targetAddr, initialPayload)
 }

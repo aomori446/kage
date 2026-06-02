@@ -15,13 +15,15 @@ var (
 type AddressType byte
 
 const (
-	AtypIPV4       AddressType = 1
+	AtypIPv4       AddressType = 1
 	AtypDomainName AddressType = 3
-	AtypIPV6       AddressType = 4
+	AtypIPv6       AddressType = 4
 )
 
 type Address struct {
 	Type AddressType
+	// Host holds the raw address bytes.
+	// IPv4: 4 bytes, IPv6: 16 bytes, DomainName: UTF-8 encoded bytes.
 	Host []byte
 	Port uint16
 }
@@ -29,12 +31,12 @@ type Address struct {
 func (a *Address) Bytes() []byte {
 	var host []byte
 	switch a.Type {
-	case AtypIPV4:
+	case AtypIPv4:
 		host = a.Host
 		if len(host) > 4 {
 			host = host[len(host)-4:]
 		}
-	case AtypIPV6:
+	case AtypIPv6:
 		host = a.Host
 	case AtypDomainName:
 		host = a.Host
@@ -62,11 +64,11 @@ func (a *Address) Bytes() []byte {
 func (a *Address) String() string {
 	var host string
 	switch a.Type {
-	case AtypIPV4:
+	case AtypIPv4:
 		host = net.IP(a.Host).To4().String()
 	case AtypDomainName:
 		host = string(a.Host)
-	case AtypIPV6:
+	case AtypIPv6:
 		host = net.IP(a.Host).To16().String()
 	default:
 		return "unknown"
@@ -84,12 +86,12 @@ func ReadAddress(r io.Reader) (*Address, error) {
 	var host []byte
 	
 	switch atyp {
-	case AtypIPV4:
+	case AtypIPv4:
 		host = make([]byte, net.IPv4len)
 		if _, err := io.ReadFull(r, host); err != nil {
 			return nil, err
 		}
-	case AtypIPV6:
+	case AtypIPv6:
 		host = make([]byte, net.IPv6len)
 		if _, err := io.ReadFull(r, host); err != nil {
 			return nil, err
@@ -135,10 +137,10 @@ func ParseAddress(s string) (*Address, error) {
 		atyp = AtypDomainName
 	} else if ipv4 := ip.To4(); ipv4 != nil {
 		host = ipv4
-		atyp = AtypIPV4
+		atyp = AtypIPv4
 	} else {
 		host = ip.To16()
-		atyp = AtypIPV6
+		atyp = AtypIPv6
 	}
 	
 	port, _ := strconv.Atoi(p)
@@ -151,7 +153,7 @@ func ParseAddress(s string) (*Address, error) {
 
 func EmptyAddress() *Address {
 	return &Address{
-		Type: AtypIPV4,
+		Type: AtypIPv4,
 		Host: []byte{0, 0, 0, 0},
 		Port: 0,
 	}
@@ -166,13 +168,13 @@ func ReadAddressFromBytes(b []byte) (*Address, error) {
 	var offset int
 	
 	switch atyp {
-	case AtypIPV4:
+	case AtypIPv4:
 		if len(b) < 1+net.IPv4len+2 {
 			return nil, io.ErrUnexpectedEOF
 		}
 		host = b[1 : 1+net.IPv4len]
 		offset = 1 + net.IPv4len
-	case AtypIPV6:
+	case AtypIPv6:
 		if len(b) < 1+net.IPv6len+2 {
 			return nil, io.ErrUnexpectedEOF
 		}

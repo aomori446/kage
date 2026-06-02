@@ -6,59 +6,57 @@ import (
 	"errors"
 	"io"
 	"kage/core"
-	"log/slog"
 	"net"
 )
 
 type Conn struct {
 	net.Conn
 	
-	Method   string
 	enCipher *Cipher
 	deCipher *Cipher
 	
 	readBuffer []byte
 	
-	readResponseHeaderOnce bool
-	writeRequestHeaderOnce bool
+	responseHeaderRead   bool
+	requestHeaderWritten bool
 	
 	targetAddr     *core.Address
 	initialPayload []byte
 }
 
-func NewConn(conn net.Conn, method string, enCipher *Cipher, targetAddr *core.Address, initialPayload []byte) *Conn {
+func NewConn(conn net.Conn, method string, psk []byte, targetAddr *core.Address, initialPayload []byte) (*Conn, error) {
+	enCipher, err := NewCipher(method, psk)
+	if err != nil {
+		return nil, err
+	}
+	
 	return &Conn{
-		Conn:     conn,
-		Method:   method,
-		enCipher: enCipher,
-		deCipher: nil,
-		
-		readBuffer: make([]byte, 0),
-		
-		readResponseHeaderOnce: false,
-		writeRequestHeaderOnce: false,
-		
+		Conn:           conn,
+		enCipher:       enCipher,
 		targetAddr:     targetAddr,
 		initialPayload: initialPayload,
-	}
+	}, nil
 }
 
 func (s *Conn) Write(p []byte) (n int, err error) {
 	var buf []byte
-	if !s.writeRequestHeaderOnce {
+	if !s.requestHeaderWritten {
 		flHeader, vlHeader, err := PackRequestHeader(s.targetAddr, s.initialPayload)
 		if err != nil {
 			return 0, err
 		}
+		
 		buf = append(buf, s.enCipher.Salt...)
 		buf = s.enCipher.Seal(buf, flHeader)
 		buf = s.enCipher.Seal(buf, vlHeader)
-		s.writeRequestHeaderOnce = true
+		
+		s.requestHeaderWritten = true
 	}
 	
 	if len(p) > 0 {
 		payloadSize := make([]byte, 2)
 		binary.BigEndian.PutUint16(payloadSize, uint16(len(p)))
+		
 		buf = s.enCipher.Seal(buf, payloadSize)
 		buf = s.enCipher.Seal(buf, p)
 	}
@@ -73,14 +71,14 @@ func (s *Conn) Write(p []byte) (n int, err error) {
 }
 
 func (s *Conn) Read(p []byte) (n int, err error) {
-	if !s.readResponseHeaderOnce {
+	if !s.responseHeaderRead {
 		saltSize := len(s.enCipher.Salt)
 		headerBuf := make([]byte, 2*saltSize+27)
 		if _, err := io.ReadFull(s.Conn, headerBuf); err != nil {
 			return 0, err
 		}
 		
-		deCipher, err := NewCipherWithSalt(s.Method, s.enCipher.Key, headerBuf[:saltSize])
+		deCipher, err := NewCipherWithSalt(s.enCipher.Method, s.enCipher.Key, headerBuf[:saltSize])
 		if err != nil {
 			return 0, err
 		}
@@ -88,7 +86,6 @@ func (s *Conn) Read(p []byte) (n int, err error) {
 		
 		data, err := s.deCipher.Open(nil, headerBuf[saltSize:])
 		if err != nil {
-			slog.Error("SS outbound: response header decrypt failed", "error", err)
 			return 0, errors.New("shadowsocks: failed to open response fixed-length header")
 		}
 		
@@ -101,22 +98,17 @@ func (s *Conn) Read(p []byte) (n int, err error) {
 		}
 		
 		vlLen := binary.BigEndian.Uint16(data[9+saltSize:])
-		if vlLen > 0 {
-			vlBuf := make([]byte, int(vlLen)+16)
-			if _, err := io.ReadFull(s.Conn, vlBuf); err != nil {
-				return 0, err
-			}
-			vlData, err := s.deCipher.Open(nil, vlBuf)
-			if err != nil {
-				return 0, errors.New("shadowsocks: failed to open response variable-length header")
-			}
-			
-			if len(vlData) > 0 {
-				s.readBuffer = append(s.readBuffer, vlData...)
-			}
+		vlBuf := make([]byte, int(vlLen)+16)
+		if _, err := io.ReadFull(s.Conn, vlBuf); err != nil {
+			return 0, err
 		}
+		vlData, err := s.deCipher.Open(nil, vlBuf)
+		if err != nil {
+			return 0, errors.New("shadowsocks: failed to open response variable-length header")
+		}
+		s.readBuffer = append(s.readBuffer, vlData...)
 		
-		s.readResponseHeaderOnce = true
+		s.responseHeaderRead = true
 	}
 	
 	if len(s.readBuffer) > 0 {
@@ -126,29 +118,22 @@ func (s *Conn) Read(p []byte) (n int, err error) {
 	}
 	
 	chunkHeader := make([]byte, 18)
-	if _, err := io.ReadFull(s.Conn, chunkHeader); err != nil {
+	if _, err = io.ReadFull(s.Conn, chunkHeader); err != nil {
 		return 0, err
 	}
 	
 	lenBuf, err := s.deCipher.Open(nil, chunkHeader)
 	if err != nil {
-		slog.Error("SS outbound: chunk length decrypt failed", "error", err)
 		return 0, err
 	}
 	
-	payloadLen := int(binary.BigEndian.Uint16(lenBuf))
-	if payloadLen == 0 {
-		return 0, io.EOF
-	}
-	
-	fullPayloadBuf := make([]byte, payloadLen+16)
-	if _, err := io.ReadFull(s.Conn, fullPayloadBuf); err != nil {
+	payloadLen := binary.BigEndian.Uint16(lenBuf)
+	payloadBuf := make([]byte, payloadLen+16)
+	if _, err = io.ReadFull(s.Conn, payloadBuf); err != nil {
 		return 0, err
 	}
-	
-	payload, err := s.deCipher.Open(nil, fullPayloadBuf)
+	payload, err := s.deCipher.Open(nil, payloadBuf)
 	if err != nil {
-		slog.Error("SS outbound: chunk payload decrypt failed", "error", err)
 		return 0, err
 	}
 	

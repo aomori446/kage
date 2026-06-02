@@ -8,11 +8,11 @@ import (
 )
 
 type InboundConfig struct {
-	Type     string `json:"type"`
-	Listen   string `json:"listen"`
-	Target   string `json:"target"`
-	FastOpen bool   `json:"fast_open"`
-	UDP      bool   `json:"udp"`
+	Type       string `json:"type"`
+	ListenAddr string `json:"listen"`
+	Target     string `json:"target"`
+	FastOpen   bool   `json:"fast_open"`
+	UDP        bool   `json:"udp"`
 }
 
 type Config struct {

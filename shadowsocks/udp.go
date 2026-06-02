@@ -1,6 +1,7 @@
 package shadowsocks
 
 import (
+	"context"
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/binary"
@@ -10,6 +11,8 @@ import (
 	"net"
 	"sync"
 	"time"
+	
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -30,14 +33,14 @@ func NewUDPSession(method string, psk []byte) (*UDPSession, error) {
 		return nil, fmt.Errorf("generate session id: %w", err)
 	}
 	
-	cipher, err := NewCipherWithSalt(method, psk, id)
+	c, err := NewCipherWithSalt(method, psk, id)
 	if err != nil {
 		return nil, fmt.Errorf("create session cipher: %w", err)
 	}
 	
 	return &UDPSession{
 		ID:     id,
-		Cipher: cipher,
+		Cipher: c,
 	}, nil
 }
 
@@ -49,80 +52,151 @@ func (s *UDPSession) SeparateHeader() []byte {
 	return sh
 }
 
-type UDP struct {
+type UDPClient struct {
 	Method      string
 	PSK         []byte
 	BlockCipher cipher.Block
 	
-	ServerAddr *net.UDPAddr
+	ClientConn *net.UDPConn
+	ServerConn *net.UDPConn
 	
-	// server session ID -> server session cipher
-	serverSessions sync.Map
-	// client addr -> client session
+	// server session ID → server session *Cipher
+	serverCiphers sync.Map
+	// client addr → client *UDPSession
 	clientSessions sync.Map
-	// client session ID -> client addr
-	clientSessionIDs sync.Map
+	// client session ID → client net.Addr (reverse index for Unpack)
+	clientAddrByID sync.Map
 }
 
-func NewUDP(method string, psk []byte, serverAddr string) (*UDP, error) {
+func NewUDPClient(method string, psk []byte, listenAddr, serverAddr string) (*UDPClient, error) {
 	block, err := NewBlockCipher(psk)
 	if err != nil {
 		return nil, err
 	}
 	
-	addr, err := net.ResolveUDPAddr("udp", serverAddr)
+	lnAddr, err := net.ResolveUDPAddr("udp", listenAddr)
+	if err != nil {
+		return nil, err
+	}
+	clientConn, err := net.ListenUDP("udp", lnAddr)
 	if err != nil {
 		return nil, err
 	}
 	
-	return &UDP{
+	sAddr, err := net.ResolveUDPAddr("udp", serverAddr)
+	if err != nil {
+		return nil, err
+	}
+	serverConn, err := net.DialUDP("udp", nil, sAddr)
+	if err != nil {
+		return nil, err
+	}
+	
+	return &UDPClient{
 		Method:      method,
 		PSK:         psk,
 		BlockCipher: block,
-		ServerAddr:  addr,
+		ClientConn:  clientConn,
+		ServerConn:  serverConn,
 	}, nil
 }
 
-func (s *UDP) GetServerAddr() *net.UDPAddr {
-    return s.ServerAddr
+func (c *UDPClient) Run(ctx context.Context) error {
+	var errGroup errgroup.Group
+	
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	
+	errGroup.Go(func() error {
+		<-ctx.Done()
+		c.ClientConn.Close()
+		c.ServerConn.Close()
+		return nil
+	})
+	
+	errGroup.Go(func() error {
+		defer cancel()
+		
+		buf := make([]byte, 65535)
+		for {
+			n, fromAddr, err := c.ClientConn.ReadFrom(buf)
+			if err != nil {
+				return fmt.Errorf("read UDP packet from client connection failed: %w", err)
+			}
+			
+			packed, err := c.EncryptPacket(fromAddr, buf[:n])
+			if err != nil {
+				return fmt.Errorf("pack UDP packet failed: %w", err)
+			}
+			
+			_, err = c.ServerConn.Write(packed)
+			if err != nil {
+				return fmt.Errorf("write UDP packet to server connection failed: %w", err)
+			}
+		}
+	})
+	
+	errGroup.Go(func() error {
+		defer cancel()
+		
+		buf := make([]byte, 65535)
+		for {
+			n, fromAddr, err := c.ServerConn.ReadFrom(buf)
+			if err != nil {
+				return fmt.Errorf("read UDP packet from server connection failed: %w", err)
+			}
+			
+			if fromAddr.String() != c.ServerConn.RemoteAddr().String() {
+				return fmt.Errorf("got different address from server address: got %s, want:%s", fromAddr.String(), c.ServerConn.RemoteAddr().String())
+			}
+			
+			unpacked, toAddr, err := c.DecryptPacket(buf[:n])
+			if err != nil {
+				return fmt.Errorf("unpack UDP packet failed: %w", err)
+			}
+			
+			_, err = c.ClientConn.WriteTo(unpacked, toAddr)
+			if err != nil {
+				return fmt.Errorf("write UDP packet to client connection failed: %w", err)
+			}
+		}
+	})
+	
+	return errGroup.Wait()
 }
 
-func (s *UDP) Pack(clientAddr *net.UDPAddr, data []byte) ([]byte, error) {
-	session, err := s.getOrCreateClientSession(clientAddr)
+func (c *UDPClient) EncryptPacket(clientAddr net.Addr, data []byte) ([]byte, error) {
+	session, err := c.getOrCreateClientSession(clientAddr)
 	if err != nil {
 		return nil, err
 	}
 	
 	separateHeader := session.SeparateHeader()
 	enSeparateHeader := make([]byte, 16)
-	s.BlockCipher.Encrypt(enSeparateHeader, separateHeader)
+	c.BlockCipher.Encrypt(enSeparateHeader, separateHeader)
 	
-	messageHeader, err := s.buildMessageHeader()
+	messageHeader, err := c.buildMessageHeader()
 	if err != nil {
 		return nil, err
 	}
 	
 	body := append(messageHeader, data...)
 	
-	aeadNonce := make([]byte, 12)
-	copy(aeadNonce[:4], session.ID[4:8])
-	copy(aeadNonce[4:], separateHeader[8:16])
-	
-	enBody := session.Cipher.AEAD.Seal(nil, aeadNonce, body, nil)
+	enBody := session.Cipher.AEAD.Seal(nil, separateHeader[4:16], body, nil)
 	session.Cipher.Counter.Count()
 	
 	return append(enSeparateHeader, enBody...), nil
 }
 
-func (s *UDP) Unpack(payload []byte) ([]byte, *net.UDPAddr, error) {
+func (c *UDPClient) DecryptPacket(payload []byte) ([]byte, net.Addr, error) {
 	if len(payload) < 16 {
 		return nil, nil, ErrPayloadTooShort
 	}
 	
 	deHeader := make([]byte, 16)
-	s.BlockCipher.Decrypt(deHeader, payload[:16])
+	c.BlockCipher.Decrypt(deHeader, payload[:16])
 	
-	serverCipher, err := s.getOrCreateServerCipher(deHeader[:8])
+	serverCipher, err := c.getOrCreateServerCipher(deHeader[:8])
 	if err != nil {
 		return nil, nil, err
 	}
@@ -136,51 +210,61 @@ func (s *UDP) Unpack(payload []byte) ([]byte, *net.UDPAddr, error) {
 		return nil, nil, fmt.Errorf("decrypt body: %w", err)
 	}
 	
-	body, clientSessionID, err := s.resolveBody(deBody)
+	body, clientSessionID, err := c.parseMessageBody(deBody)
 	if err != nil {
 		return nil, nil, err
 	}
 	
-	v, ok := s.clientSessionIDs.Load(string(clientSessionID))
+	v, ok := c.clientAddrByID.Load(string(clientSessionID))
 	if !ok {
 		return nil, nil, ErrSessionNotFound
 	}
 	
-	return body, v.(*net.UDPAddr), nil
+	return body, v.(net.Addr), nil
 }
 
-func (s *UDP) getOrCreateClientSession(addr *net.UDPAddr) (*UDPSession, error) {
+func (c *UDPClient) Close() error {
+	c.ClientConn.Close()
+	c.ServerConn.Close()
+	return nil
+}
+
+func (c *UDPClient) getOrCreateClientSession(addr net.Addr) (*UDPSession, error) {
 	key := addr.String()
-	if v, ok := s.clientSessions.Load(key); ok {
+	if v, ok := c.clientSessions.Load(key); ok {
 		return v.(*UDPSession), nil
 	}
 	
-	session, err := NewUDPSession(s.Method, s.PSK)
+	session, err := NewUDPSession(c.Method, c.PSK)
 	if err != nil {
 		return nil, err
 	}
 	
-	s.clientSessions.Store(key, session)
-	s.clientSessionIDs.Store(string(session.ID), addr)
+	actual, loaded := c.clientSessions.LoadOrStore(key, session)
+	if loaded {
+		return actual.(*UDPSession), nil
+	}
+	
+	c.clientAddrByID.Store(string(session.ID), addr)
 	return session, nil
 }
 
-func (s *UDP) getOrCreateServerCipher(sessionID []byte) (*Cipher, error) {
+func (c *UDPClient) getOrCreateServerCipher(sessionID []byte) (*Cipher, error) {
 	key := string(sessionID)
-	if v, ok := s.serverSessions.Load(key); ok {
+	if v, ok := c.serverCiphers.Load(key); ok {
 		return v.(*Cipher), nil
 	}
 	
-	cipher, err := NewCipherWithSalt(s.Method, s.PSK, sessionID)
+	cipher, err := NewCipherWithSalt(c.Method, c.PSK, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	
-	s.serverSessions.Store(key, cipher)
+	c.serverCiphers.Store(key, cipher)
 	return cipher, nil
 }
 
-func (s *UDP) buildMessageHeader() ([]byte, error) {
+func (c *UDPClient) buildMessageHeader() ([]byte, error) {
 	mh := []byte{0x00} // Type: Client-to-Server
 	
 	timestamp := make([]byte, 8)
@@ -201,7 +285,7 @@ func (s *UDP) buildMessageHeader() ([]byte, error) {
 	return append(mh, padding...), nil
 }
 
-func (s *UDP) resolveBody(deBody []byte) ([]byte, []byte, error) {
+func (c *UDPClient) parseMessageBody(deBody []byte) (payload, clientSessionID []byte, err error) {
 	if len(deBody) < 1 {
 		return nil, nil, ErrPayloadTooShort
 	}
@@ -222,7 +306,7 @@ func (s *UDP) resolveBody(deBody []byte) ([]byte, []byte, error) {
 	if len(deBody) < 8 {
 		return nil, nil, ErrPayloadTooShort
 	}
-	clientSessionID := make([]byte, 8)
+	clientSessionID = make([]byte, 8)
 	copy(clientSessionID, deBody[:8])
 	deBody = deBody[8:]
 	

@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func InitLogger(level string) {
+func SetLogLevel(level string) {
 	var l slog.Level
 	switch strings.ToLower(level) {
 	case "debug":
@@ -18,12 +18,6 @@ func InitLogger(level string) {
 	default:
 		l = slog.LevelInfo
 	}
-
-	opts := &slog.HandlerOptions{
-		Level: l,
-	}
-
-	handler := slog.NewTextHandler(os.Stdout, opts)
-	logger := slog.New(handler)
-	slog.SetDefault(logger)
+	
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: l})))
 }

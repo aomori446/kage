@@ -8,12 +8,12 @@ import (
 	"time"
 )
 
-func PackRequestHeader(targetAddr *core.Address, initialPayload []byte) ([]byte, []byte, error) {
+func PackRequestHeader(targetAddr *core.Address, initialPayload []byte) (fixedLenHeader, varLenHeader []byte, err error) {
 	addr := targetAddr.Bytes()
 	
 	n := rand.IntN(899) + 1
 	padding := make([]byte, n)
-	_, err := crand.Read(padding)
+	_, err = crand.Read(padding)
 	if err != nil {
 		return nil, nil, err
 	}
