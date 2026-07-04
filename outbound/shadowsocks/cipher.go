@@ -21,7 +21,7 @@ func (c *Counter) Count() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		c.buf[i]++
 		if c.buf[i] != 0 {
 			break

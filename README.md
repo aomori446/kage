@@ -12,6 +12,7 @@ It processes incoming connections from user applications (browsers or other tool
 - **SOCKS5**: A versatile proxy protocol. Supports both TCP and **UDP (Shadowsocks 2022 / SIP022)** relays.
 - **HTTP Proxy**: A standard proxy protocol for HTTP communications.
 - **TCP Tunnel**: A port forwarding utility that relays TCP connections from a local port to a remote target address.
+- **Shadowsocks**: A secure proxy protocol. Listens for incoming encrypted Shadowsocks 2022 connections, decrypts the request, and forwards it to the target.
 
 ### Outbound (Remote Connections)
 `kage` decouples inbounds from outbounds via a generic interface, supporting:
