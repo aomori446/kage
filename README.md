@@ -49,6 +49,7 @@ The project follows the standard Go project layout:
 ├── core/                    # Common infrastructure (Address parsing, TCP Relay)
 ├── inbound/                 # Inbound protocol handlers
 │   ├── http/                # HTTP Proxy server
+│   ├── shadowsocks/         # Shadowsocks 2022 Proxy server (TCP support)
 │   ├── socks5/              # SOCKS5 Proxy server (with TCP & UDP support)
 │   └── tunnel/              # TCP Port Forwarding Tunnel
 ├── outbound/                # Outbound protocol handlers
@@ -111,7 +112,7 @@ Configurations are specified in JSON format. Below is an example:
 - `key`: The pre-shared master key (PSK) for Shadowsocks (only required for `"shadowsocks"` outbound). **Note:** Must be a **Base64 encoded** string.
 - `log_level`: The logging verbosity (`debug`, `info`, `warn`, `error`).
 - `inbounds`: An array of local ports to listen on.
-  - `type`: The inbound type, one of: `socks5`, `http`, `tunnel`.
+  - `type`: The inbound type, one of: `socks5`, `http`, `tunnel`, `shadowsocks`.
   - `listen`: The local IP and port to listen on (`IP:Port`).
   - `target`: The destination target address (`IP:Port`) (required only when `type` is `tunnel`).
   - `fast_open`: (Optional) Set to `true` to enable TCP Fast Open.
