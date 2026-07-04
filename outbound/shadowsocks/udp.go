@@ -1,7 +1,6 @@
 package shadowsocks
 
 import (
-	"context"
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/binary"
@@ -11,8 +10,8 @@ import (
 	"net"
 	"sync"
 	"time"
-	
-	"golang.org/x/sync/errgroup"
+
+	"github.com/aomori446/kage/core"
 )
 
 var (
@@ -56,29 +55,18 @@ type UDPRelay struct {
 	Method      string
 	PSK         []byte
 	BlockCipher cipher.Block
-	
-	ClientConn *net.UDPConn
-	ServerConn *net.UDPConn
-	
-	// server session ID → server session *Cipher
+	ServerConn  *net.UDPConn
+
+	// client session ID -> target address
+	targetByID sync.Map
+	// target address string -> client UDPSession
+	sessionsByTarget sync.Map
+	// server session ID -> server session *Cipher
 	serverCiphers sync.Map
-	// client addr → client *UDPSession
-	clientSessions sync.Map
-	// client session ID → client net.Addr (reverse index for Unpack)
-	clientAddrByID sync.Map
 }
 
-func NewUDPRelay(method string, psk []byte, listenAddr, serverAddr string) (*UDPRelay, error) {
+func NewUDPRelay(method string, psk []byte, serverAddr string) (*UDPRelay, error) {
 	block, err := NewBlockCipher(psk)
-	if err != nil {
-		return nil, err
-	}
-	
-	lnAddr, err := net.ResolveUDPAddr("udp", listenAddr)
-	if err != nil {
-		return nil, err
-	}
-	clientConn, err := net.ListenUDP("udp", lnAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -96,79 +84,14 @@ func NewUDPRelay(method string, psk []byte, listenAddr, serverAddr string) (*UDP
 		Method:      method,
 		PSK:         psk,
 		BlockCipher: block,
-		ClientConn:  clientConn,
 		ServerConn:  serverConn,
 	}, nil
 }
 
-func (c *UDPRelay) Run(ctx context.Context) error {
-	var errGroup errgroup.Group
-	
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	
-	errGroup.Go(func() error {
-		<-ctx.Done()
-		c.ClientConn.Close()
-		c.ServerConn.Close()
-		return nil
-	})
-	
-	errGroup.Go(func() error {
-		defer cancel()
-		
-		buf := make([]byte, 65535)
-		for {
-			n, fromAddr, err := c.ClientConn.ReadFrom(buf)
-			if err != nil {
-				return fmt.Errorf("read UDP packet from client connection failed: %w", err)
-			}
-			
-			packed, err := c.EncryptPacket(fromAddr, buf[:n])
-			if err != nil {
-				return fmt.Errorf("pack UDP packet failed: %w", err)
-			}
-			
-			_, err = c.ServerConn.Write(packed)
-			if err != nil {
-				return fmt.Errorf("write UDP packet to server connection failed: %w", err)
-			}
-		}
-	})
-	
-	errGroup.Go(func() error {
-		defer cancel()
-		
-		buf := make([]byte, 65535)
-		for {
-			n, fromAddr, err := c.ServerConn.ReadFrom(buf)
-			if err != nil {
-				return fmt.Errorf("read UDP packet from server connection failed: %w", err)
-			}
-			
-			if fromAddr.String() != c.ServerConn.RemoteAddr().String() {
-				return fmt.Errorf("got different address from server address: got %s, want:%s", fromAddr.String(), c.ServerConn.RemoteAddr().String())
-			}
-			
-			unpacked, toAddr, err := c.DecryptPacket(buf[:n])
-			if err != nil {
-				return fmt.Errorf("unpack UDP packet failed: %w", err)
-			}
-			
-			_, err = c.ClientConn.WriteTo(unpacked, toAddr)
-			if err != nil {
-				return fmt.Errorf("write UDP packet to client connection failed: %w", err)
-			}
-		}
-	})
-	
-	return errGroup.Wait()
-}
-
-func (c *UDPRelay) EncryptPacket(clientAddr net.Addr, data []byte) ([]byte, error) {
-	session, err := c.getOrCreateClientSession(clientAddr)
+func (c *UDPRelay) WriteTo(p []byte, target *core.Address) (int, error) {
+	session, err := c.getOrCreateSession(target)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	
 	separateHeader := session.SeparateHeader()
@@ -177,61 +100,75 @@ func (c *UDPRelay) EncryptPacket(clientAddr net.Addr, data []byte) ([]byte, erro
 	
 	messageHeader, err := c.buildMessageHeader()
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	
-	body := append(messageHeader, data...)
+	targetBytes := target.Bytes()
+	body := append(messageHeader, targetBytes...)
+	body = append(body, p...)
 	
 	enBody := session.Cipher.AEAD.Seal(nil, separateHeader[4:16], body, nil)
 	session.Cipher.Counter.Count()
 	
-	return append(enSeparateHeader, enBody...), nil
+	packet := append(enSeparateHeader, enBody...)
+	_, err = c.ServerConn.Write(packet)
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
-func (c *UDPRelay) DecryptPacket(payload []byte) ([]byte, net.Addr, error) {
-	if len(payload) < 16 {
-		return nil, nil, ErrPayloadTooShort
+func (c *UDPRelay) ReadFrom(p []byte) (int, *core.Address, error) {
+	buf := make([]byte, 65535)
+	for {
+		rn, err := c.ServerConn.Read(buf)
+		if err != nil {
+			return 0, nil, err
+		}
+		
+		if rn < 16 {
+			continue
+		}
+		
+		deHeader := make([]byte, 16)
+		c.BlockCipher.Decrypt(deHeader, buf[:16])
+		
+		serverCipher, err := c.getOrCreateServerCipher(deHeader[:8])
+		if err != nil {
+			continue
+		}
+		
+		aeadNonce := make([]byte, 12)
+		copy(aeadNonce[:4], deHeader[4:8])
+		copy(aeadNonce[4:], deHeader[8:16])
+		
+		deBody, err := serverCipher.AEAD.Open(nil, aeadNonce, buf[16:rn], nil)
+		if err != nil {
+			continue
+		}
+		
+		body, clientSessionID, err := c.parseMessageBody(deBody)
+		if err != nil {
+			continue
+		}
+		
+		v, ok := c.targetByID.Load(string(clientSessionID))
+		if !ok {
+			continue
+		}
+		
+		n := copy(p, body)
+		return n, v.(*core.Address), nil
 	}
-	
-	deHeader := make([]byte, 16)
-	c.BlockCipher.Decrypt(deHeader, payload[:16])
-	
-	serverCipher, err := c.getOrCreateServerCipher(deHeader[:8])
-	if err != nil {
-		return nil, nil, err
-	}
-	
-	aeadNonce := make([]byte, 12)
-	copy(aeadNonce[:4], deHeader[4:8])
-	copy(aeadNonce[4:], deHeader[8:16])
-	
-	deBody, err := serverCipher.AEAD.Open(nil, aeadNonce, payload[16:], nil)
-	if err != nil {
-		return nil, nil, fmt.Errorf("decrypt body: %w", err)
-	}
-	
-	body, clientSessionID, err := c.parseMessageBody(deBody)
-	if err != nil {
-		return nil, nil, err
-	}
-	
-	v, ok := c.clientAddrByID.Load(string(clientSessionID))
-	if !ok {
-		return nil, nil, ErrSessionNotFound
-	}
-	
-	return body, v.(net.Addr), nil
 }
 
 func (c *UDPRelay) Close() error {
-	c.ClientConn.Close()
-	c.ServerConn.Close()
-	return nil
+	return c.ServerConn.Close()
 }
 
-func (c *UDPRelay) getOrCreateClientSession(addr net.Addr) (*UDPSession, error) {
-	key := addr.String()
-	if v, ok := c.clientSessions.Load(key); ok {
+func (c *UDPRelay) getOrCreateSession(target *core.Address) (*UDPSession, error) {
+	key := target.String()
+	if v, ok := c.sessionsByTarget.Load(key); ok {
 		return v.(*UDPSession), nil
 	}
 	
@@ -240,12 +177,12 @@ func (c *UDPRelay) getOrCreateClientSession(addr net.Addr) (*UDPSession, error) 
 		return nil, err
 	}
 	
-	actual, loaded := c.clientSessions.LoadOrStore(key, session)
+	actual, loaded := c.sessionsByTarget.LoadOrStore(key, session)
 	if loaded {
 		return actual.(*UDPSession), nil
 	}
 	
-	c.clientAddrByID.Store(string(session.ID), addr)
+	c.targetByID.Store(string(session.ID), target)
 	return session, nil
 }
 
