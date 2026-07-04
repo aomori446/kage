@@ -19,7 +19,7 @@ type Inbound interface {
 }
 
 func main() {
-	configPath := flag.String("c", "config.json", "Config file path")
+	configPath := flag.String("c", "testdata/config.json", "Config file path")
 	flag.Parse()
 
 	SetLogLevel("")
