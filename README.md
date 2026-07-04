@@ -1,67 +1,86 @@
 # kage
 
-Go 言語で開発された、シンプルかつ軽量・高速なプロキシツールです。
-ローカルからの複数種類の接続を受け付け、外部のプロキシサーバーへの通信（アウトバウンド）には強力な暗号化通信プロトコルである **Shadowsocks** を採用しています。
+A simple, lightweight, and high-performance proxy tool written in Go.
+It supports multiple local inbound connection types and forwards traffic to remote servers with configurable outbound protocols, including **Shadowsocks 2022** and **Raw (Direct/Freedom)** outbound.
 
-## 特徴とアーキテクチャ
+## Features & Architecture
 
-本ツールは、柔軟なルーティングとセキュアな通信を提供するために設計されています。
+This tool is designed to provide flexible routing, multiple protocol support, and secure communications.
 
-### インバウンド (Inbound: ローカルからの接続受付)
-ユーザーのアプリケーション（ブラウザやその他のツール）からの接続を処理します。1つのプロセスで複数のインバウンドを同時に待ち受けることが可能です。
-- **SOCKS5**: 汎用的なプロキシプロトコル。TCP に加え、**UDP (Shadowsocks 2022 / SIP022)** にも対応しています。
-- **HTTP Proxy**: 一般的な HTTP 通信用のプロキシプロトコル。
-- **TCP Tunnel**: ローカルの特定のポートへの接続を、リモートの指定したターゲット（IPとポート）へそのまま転送（ポートフォワーディング）する機能。
+### Inbound (Local Connection Handling)
+It processes incoming connections from user applications (browsers or other tools). A single process can run multiple inbound handlers simultaneously:
+- **SOCKS5**: A versatile proxy protocol. Supports both TCP and **UDP (Shadowsocks 2022 / SIP022)** relays.
+- **HTTP Proxy**: A standard proxy protocol for HTTP communications.
+- **TCP Tunnel**: A port forwarding utility that relays TCP connections from a local port to a remote target address.
 
-### アウトバウンド (Outbound: 外部サーバーへの接続)
-- **Shadowsocks**: すべてのアウトバウンドトラフィックは、**Shadowsocks** プロトコルを使用して暗号化され、リモートサーバーへ転送されます。**Shadowsocks 2022** 仕様に準拠した最新の暗号化方式と UDP 転送をサポートしています。
+### Outbound (Remote Connections)
+`kage` decouples inbounds from outbounds via a generic interface, supporting:
+- **Shadowsocks**: Encrypts and relays outbound traffic to a remote server. Supports the latest **Shadowsocks 2022** specification (AEAD-2022) with advanced encryption methods and UDP relay.
+- **Raw (Direct)**: Bypasses proxies and establishes direct TCP connections to target destinations.
 
-## インストール方法
+---
 
-ソースコードからビルドするには、Go 環境 (1.25 以上) が必要です。
+## Installation
+
+Building from source requires Go (version 1.25 or higher).
 
 ```bash
-# リポジトリのクローン
+# Clone the repository
 git clone https://github.com/aomori446/kage.git
 cd kage
 
-# クライアントのビルド
-go build -o kage .
+# Build the binary
+go build ./cmd/kage
 ```
 
-## プロジェクト構造
+---
 
-本プロジェクトは、メンテナンス性と拡張性を考慮した 2 層のディレクトリ構造を採用しています。
+## Project Structure
+
+The project follows the standard Go project layout:
 
 ```text
 /kage/
-├── main.go            # エントリポイント
-├── config.go          # 設定読み込み
-├── logger.go          # ログ初期化
-├── core/              # 共通基盤 (Address, Relay)
-├── shadowsocks/       # Shadowsocks プロトコル実装
-├── socks5/            # SOCKS5 プロトコル実装
-├── http/              # HTTP プロキシ実装
-└── tunnel/            # TCP トンネル実装
+├── cmd/
+│   └── kage/
+│       ├── main.go          # CLI Entrypoint
+│       ├── config.go        # Configuration loader
+│       └── logger.go        # Logger initialization
+├── core/                    # Common infrastructure (Address parsing, TCP Relay)
+├── inbound/                 # Inbound protocol handlers
+│   ├── http/                # HTTP Proxy server
+│   ├── socks5/              # SOCKS5 Proxy server (with TCP & UDP support)
+│   └── tunnel/              # TCP Port Forwarding Tunnel
+├── outbound/                # Outbound protocol handlers
+│   ├── outbound.go          # Outbound interface
+│   ├── raw/                 # Direct Outbound (no proxy)
+│   └── shadowsocks/         # Shadowsocks 2022 Outbound
+└── testdata/                # Example configurations and test data
+    └── config.json          # Example configuration file
 ```
 
-## 使い方
+---
 
-設定ファイル (`config.json`) を指定してプログラムを起動します。
+## Usage
+
+Start the proxy server by specifying a configuration file. By default, it looks for `testdata/config.json`.
 
 ```bash
-./kage -c config.json
+./kage -c testdata/config.json
 ```
 
-## 設定ファイル仕様 (`config.json`)
+---
 
-設定は JSON 形式で行います。以下はクライアント側の設定例です。
+## Configuration File (`config.json`)
+
+Configurations are specified in JSON format. Below is an example:
 
 ```json
 {
+  "outbound": "shadowsocks",
   "server": "example.com:8388",
-  "method": "2022-blake3-aes-128-gcm",
-  "password": "BASE64_ENCODED_PASSWORD_HERE",
+  "method": "2022-blake3-aes-256-gcm",
+  "key": "rwQc8qPXVsRpGx3uW+Y3Lj4Y42yF9Bs0xg1pmx8/+bo=",
   "log_level": "info",
   "inbounds": [
     {
@@ -83,21 +102,23 @@ go build -o kage .
 }
 ```
 
-### パラメータの説明
+### Parameters
 
-- `server`: 接続先となるリモートの Shadowsocks サーバーのアドレスとポート (`IP:Port`)。
-- `method`: Shadowsocks の暗号化方式。
-  - Shadowsocks 2022: `2022-blake3-aes-128-gcm`, `2022-blake3-aes-256-gcm`, `2022-blake3-chacha20-poly1305`
-  - 従来方式: `aes-128-gcm`, `aes-256-gcm`, `chacha20-ietf-poly1305`
-- `password`: Shadowsocks サーバーのパスワード（PSK）。**注意:** 設定ファイルには Base64 でエンコードされた文字列を記述する必要があります。
-- `log_level`: ログの出力レベル (`debug`, `info`, `warn`, `error`)。
-- `inbounds`: リッスンするローカルポートとプロトコルの配列。
-  - `type`: `socks5`, `http`, `tunnel` のいずれか。
-  - `listen`: ローカルで待ち受けるアドレスとポート (`IP:Port`)。
-  - `target`: `type` が `tunnel` の場合のみ必須。転送先の最終目的地 (`IP:Port`)。
-  - `fast_open`: (オプション) TCP Fast Open を有効にする場合は `true`。
-  - `udp`: (オプション) `socks5` において UDP 転送を有効にする場合は `true`。
+- `outbound`: The outbound protocol type. Supported values: `"shadowsocks"` (default) or `"raw"` (direct connection).
+- `server`: The host and port (`IP:Port`) of the remote Shadowsocks server (only required for `"shadowsocks"` outbound).
+- `method`: The encryption method for Shadowsocks (only required for `"shadowsocks"` outbound).
+  - Supported: `2022-blake3-aes-128-gcm`, `2022-blake3-aes-256-gcm`, `2022-blake3-chacha20-poly1305`
+- `key`: The pre-shared master key (PSK) for Shadowsocks (only required for `"shadowsocks"` outbound). **Note:** Must be a **Base64 encoded** string.
+- `log_level`: The logging verbosity (`debug`, `info`, `warn`, `error`).
+- `inbounds`: An array of local ports to listen on.
+  - `type`: The inbound type, one of: `socks5`, `http`, `tunnel`.
+  - `listen`: The local IP and port to listen on (`IP:Port`).
+  - `target`: The destination target address (`IP:Port`) (required only when `type` is `tunnel`).
+  - `fast_open`: (Optional) Set to `true` to enable TCP Fast Open.
+  - `udp`: (Optional) Set to `true` to enable UDP relay (SOCKS5 only).
 
-## ライセンス
+---
+
+## License
 
 MIT License
