@@ -10,14 +10,13 @@ import (
 	"syscall"
 
 	"github.com/aomori446/kage/core"
+	"github.com/aomori446/kage/outbound"
 	"github.com/aomori446/kage/outbound/shadowsocks"
 )
 
 type Inbound struct {
+	Outbound   outbound.Outbound
 	ListenAddr string
-	ServerAddr string
-	Method     string
-	Key        []byte
 	FastOpen   bool
 
 	UDP bool
@@ -79,19 +78,25 @@ func (c *Inbound) handleTCP(ctx context.Context, clientConn net.Conn, targetAddr
 		return fmt.Errorf("send response failed: %w", err)
 	}
 
-	shadowConn, err := shadowsocks.NewConn(c.ServerAddr, c.Method, c.Key, targetAddr, initialPayload)
+	outConn, err := c.Outbound.Dial(ctx, targetAddr)
 	if err != nil {
-		return fmt.Errorf("create shadow connection failed: %w", err)
+		return fmt.Errorf("create outbound connection failed: %w", err)
 	}
-	defer shadowConn.Close()
+	defer outConn.Close()
 
-	slog.Debug("[SOCKS5] TCP proxy connection established", "client", clientConn.RemoteAddr(), "server", shadowConn.RemoteAddr(), "target", targetAddr)
+	if len(initialPayload) > 0 {
+		if _, err := outConn.Write(initialPayload); err != nil {
+			return fmt.Errorf("write initial payload failed: %w", err)
+		}
+	}
 
-	if err = ignoreExpectedErrors(shadowConn.RelayWith(ctx, clientConn)); err != nil {
+	slog.Debug("[SOCKS5] TCP proxy connection established", "client", clientConn.RemoteAddr(), "target", targetAddr)
+
+	if err = ignoreExpectedErrors(core.Relay(ctx, clientConn, outConn)); err != nil {
 		return fmt.Errorf("TCP relay failed: %w", err)
 	}
 
-	slog.Debug("[SOCKS5] TCP proxy connection disconnected", "client", clientConn.RemoteAddr(), "server", shadowConn.RemoteAddr(), "target", targetAddr)
+	slog.Debug("[SOCKS5] TCP proxy connection disconnected", "client", clientConn.RemoteAddr(), "target", targetAddr)
 	return nil
 }
 
@@ -100,7 +105,12 @@ func (c *Inbound) handleUDP(ctx context.Context, clientConn net.Conn) error {
 		return fmt.Errorf("send response failed: %w", err)
 	}
 
-	udpRelay, err := shadowsocks.NewUDPRelay(c.Method, c.Key, c.ListenAddr, c.ServerAddr)
+	ssOut, ok := c.Outbound.(*shadowsocks.Outbound)
+	if !ok {
+		return fmt.Errorf("UDP is not supported for this outbound type")
+	}
+
+	udpRelay, err := shadowsocks.NewUDPRelay(ssOut.Method, ssOut.Key, c.ListenAddr, ssOut.ServerAddr)
 	if err != nil {
 		return fmt.Errorf("init UDP relay failed: %w", err)
 	}

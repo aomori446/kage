@@ -12,6 +12,9 @@ import (
 	"github.com/aomori446/kage/inbound/http"
 	"github.com/aomori446/kage/inbound/socks5"
 	"github.com/aomori446/kage/inbound/tunnel"
+	"github.com/aomori446/kage/outbound"
+	"github.com/aomori446/kage/outbound/raw"
+	"github.com/aomori446/kage/outbound/shadowsocks"
 )
 
 type Inbound interface {
@@ -41,7 +44,18 @@ func main() {
 		cancel()
 	}()
 
-	slog.Info("kage started", "inbounds", len(cfg.Inbounds), "method", cfg.Method)
+	slog.Info("kage started", "inbounds", len(cfg.Inbounds), "outbound", cfg.OutboundType)
+
+	var out outbound.Outbound
+	switch cfg.OutboundType {
+	case "shadowsocks":
+		out = shadowsocks.NewOutbound(cfg.Server, cfg.Method, cfg.Key)
+	case "raw":
+		out = raw.NewOutbound()
+	default:
+		slog.Error("unknown outbound type", "type", cfg.OutboundType)
+		os.Exit(1)
+	}
 
 	var wg sync.WaitGroup
 	for _, in := range cfg.Inbounds {
@@ -54,27 +68,21 @@ func main() {
 			switch in.Type {
 			case "socks5":
 				r = &socks5.Inbound{
+					Outbound:   out,
 					ListenAddr: in.ListenAddr,
-					ServerAddr: cfg.Server,
-					Method:     cfg.Method,
-					Key:        cfg.Key,
 					FastOpen:   in.FastOpen,
 					UDP:        in.UDP,
 				}
 			case "tunnel":
 				r = &tunnel.Inbound{
+					Outbound:   out,
 					ListenAddr: in.ListenAddr,
-					ServerAddr: cfg.Server,
-					Method:     cfg.Method,
 					TargetAddr: in.Target,
-					Key:        cfg.Key,
 				}
 			case "http":
 				r = &http.Inbound{
+					Outbound:   out,
 					ListenAddr: in.ListenAddr,
-					ServerAddr: cfg.Server,
-					Method:     cfg.Method,
-					Key:        cfg.Key,
 				}
 			default:
 				slog.Warn("unknown inbound type", "type", in.Type)

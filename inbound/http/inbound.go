@@ -11,15 +11,12 @@ import (
 	"time"
 
 	"github.com/aomori446/kage/core"
-	"github.com/aomori446/kage/outbound/shadowsocks"
+	"github.com/aomori446/kage/outbound"
 )
 
 type Inbound struct {
+	Outbound   outbound.Outbound
 	ListenAddr string
-	ServerAddr string
-
-	Method string
-	Key    []byte
 
 	ctx       context.Context
 	proxy     *httputil.ReverseProxy
@@ -73,13 +70,13 @@ func (p *Inbound) handleCONNECT(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	shadowConn, err := shadowsocks.NewConn(p.ServerAddr, p.Method, p.Key, targetAddr, nil)
+	outConn, err := p.Outbound.Dial(p.ctx, targetAddr)
 	if err != nil {
-		slog.Error("Dial Shadowsocks failed", "error", err)
+		slog.Error("Dial outbound failed", "error", err)
 		http.Error(w, "Proxy error: connection failed", http.StatusBadGateway)
 		return
 	}
-	defer shadowConn.Close()
+	defer outConn.Close()
 
 	hj, ok := w.(http.Hijacker)
 	if !ok {
@@ -100,7 +97,7 @@ func (p *Inbound) handleCONNECT(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	shadowConn.RelayWith(p.ctx, clientConn)
+	core.Relay(p.ctx, clientConn, outConn)
 }
 
 func (p *Inbound) initProxy() {
@@ -115,11 +112,11 @@ func (p *Inbound) initProxy() {
 				if err != nil {
 					return nil, err
 				}
-				shadowConn, err := shadowsocks.NewConn(p.ServerAddr, p.Method, p.Key, targetAddr, nil)
+				outConn, err := p.Outbound.Dial(ctx, targetAddr)
 				if err != nil {
 					return nil, err
 				}
-				return shadowConn, nil
+				return outConn, nil
 			},
 			MaxIdleConns:        100,
 			IdleConnTimeout:     90 * time.Second,

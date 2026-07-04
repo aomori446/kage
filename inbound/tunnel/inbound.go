@@ -7,16 +7,13 @@ import (
 	"net"
 
 	"github.com/aomori446/kage/core"
-	"github.com/aomori446/kage/outbound/shadowsocks"
+	"github.com/aomori446/kage/outbound"
 )
 
 type Inbound struct {
+	Outbound   outbound.Outbound
 	ListenAddr string
-	ServerAddr string
 	TargetAddr string
-
-	Method string
-	Key    []byte
 }
 
 func (c *Inbound) Run(ctx context.Context) error {
@@ -61,12 +58,12 @@ func (c *Inbound) handle(ctx context.Context, clientConn net.Conn) error {
 
 	slog.Debug("Tunnel connecting", "remote", clientConn.RemoteAddr(), "target", targetAddr)
 
-	shadowConn, err := shadowsocks.NewConn(c.ServerAddr, c.Method, c.Key, targetAddr, nil)
+	outConn, err := c.Outbound.Dial(ctx, targetAddr)
 	if err != nil {
 		return err
 	}
-	defer shadowConn.Close()
+	defer outConn.Close()
 
-	shadowConn.RelayWith(ctx, clientConn)
+	core.Relay(ctx, clientConn, outConn)
 	return nil
 }

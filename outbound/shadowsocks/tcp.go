@@ -2,7 +2,6 @@ package shadowsocks
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -10,8 +9,6 @@ import (
 	"time"
 
 	"github.com/aomori446/kage/core"
-
-	"golang.org/x/sync/errgroup"
 )
 
 type Conn struct {
@@ -148,50 +145,4 @@ func (c *Conn) Read(p []byte) (n int, err error) {
 		c.readBuffer = append(c.readBuffer, payload[n:]...)
 	}
 	return n, nil
-}
-
-func (c *Conn) RelayWith(ctx context.Context, conn net.Conn) error {
-	var errGroup errgroup.Group
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	halfClosed := make(chan struct{}, 2)
-	defer close(halfClosed)
-	go func() {
-		<-halfClosed
-		<-halfClosed
-		cancel()
-	}()
-
-	errGroup.Go(func() error {
-		<-ctx.Done()
-		c.Close()
-		conn.Close()
-		return ctx.Err()
-	})
-
-	errGroup.Go(func() error {
-		_, err := io.Copy(conn, c)
-		if hc, ok := conn.(HalfCloser); ok {
-			hc.CloseWrite()
-		} else {
-			conn.Close()
-		}
-		halfClosed <- struct{}{}
-		return err
-	})
-
-	errGroup.Go(func() error {
-		_, err := io.Copy(c, conn)
-		c.CloseWrite()
-		halfClosed <- struct{}{}
-		return err
-	})
-
-	return errGroup.Wait()
-}
-
-type HalfCloser interface {
-	CloseWrite() error
 }
