@@ -11,6 +11,7 @@ import (
 
 	"github.com/aomori446/kage/inbound/http"
 	"github.com/aomori446/kage/inbound/socks5"
+	inboundSS "github.com/aomori446/kage/inbound/shadowsocks"
 	"github.com/aomori446/kage/inbound/tunnel"
 	"github.com/aomori446/kage/outbound"
 	"github.com/aomori446/kage/outbound/raw"
@@ -83,6 +84,13 @@ func main() {
 				r = &http.Inbound{
 					Outbound:   out,
 					ListenAddr: in.ListenAddr,
+				}
+			case "shadowsocks":
+				r = &inboundSS.Inbound{
+					Outbound:   out,
+					ListenAddr: in.ListenAddr,
+					Method:     cfg.Method,
+					Key:        cfg.Key,
 				}
 			default:
 				slog.Warn("unknown inbound type", "type", in.Type)
