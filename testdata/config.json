@@ -1,4 +1,5 @@
 {
+  "outbound": "shadowsocks",
   "server": "127.0.0.1:8888",
   "method": "2022-blake3-aes-256-gcm",
   "key": "rwQc8qPXVsRpGx3uW+Y3Lj4Y42yF9Bs0xg1pmx8/+bo=",
