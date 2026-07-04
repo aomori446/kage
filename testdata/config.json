@@ -19,6 +19,10 @@
     {
       "type": "http",
       "listen": "127.0.0.1:1083"
+    },
+    {
+      "type": "shadowsocks",
+      "listen": "127.0.0.1:8388"
     }
   ]
 }

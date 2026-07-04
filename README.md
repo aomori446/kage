@@ -98,6 +98,10 @@ Configurations are specified in JSON format. Below is an example:
       "type": "tunnel",
       "listen": "127.0.0.1:5432",
       "target": "10.0.0.2:5432"
+    },
+    {
+      "type": "shadowsocks",
+      "listen": "127.0.0.1:8388"
     }
   ]
 }
