@@ -16,11 +16,11 @@ type InboundConfig struct {
 }
 
 type Config struct {
-	Server   string          `json:"server"`
-	Method   string          `json:"method"`
-	Password string          `json:"password"`
-	LogLevel string          `json:"log_level"` // "debug", "info", "warn", "error"
-	Inbounds []InboundConfig `json:"inbounds"`
+	Server    string          `json:"server"`
+	Method    string          `json:"method"`
+	KeyBase64 string          `json:"key"`
+	LogLevel  string          `json:"log_level"` // "debug", "info", "warn", "error"
+	Inbounds  []InboundConfig `json:"inbounds"`
 	
 	Key []byte `json:"-"`
 }
@@ -36,9 +36,9 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config: %w", err)
 	}
 
-	key, err := base64.StdEncoding.DecodeString(cfg.Password)
+	key, err := base64.StdEncoding.DecodeString(cfg.KeyBase64)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode password: %w", err)
+		return nil, fmt.Errorf("failed to decode key: %w", err)
 	}
 	cfg.Key = key
 

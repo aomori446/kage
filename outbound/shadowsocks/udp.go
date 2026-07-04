@@ -52,7 +52,7 @@ func (s *UDPSession) SeparateHeader() []byte {
 	return sh
 }
 
-type UDPClient struct {
+type UDPRelay struct {
 	Method      string
 	PSK         []byte
 	BlockCipher cipher.Block
@@ -68,7 +68,7 @@ type UDPClient struct {
 	clientAddrByID sync.Map
 }
 
-func NewUDPClient(method string, psk []byte, listenAddr, serverAddr string) (*UDPClient, error) {
+func NewUDPRelay(method string, psk []byte, listenAddr, serverAddr string) (*UDPRelay, error) {
 	block, err := NewBlockCipher(psk)
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func NewUDPClient(method string, psk []byte, listenAddr, serverAddr string) (*UD
 		return nil, err
 	}
 	
-	return &UDPClient{
+	return &UDPRelay{
 		Method:      method,
 		PSK:         psk,
 		BlockCipher: block,
@@ -101,7 +101,7 @@ func NewUDPClient(method string, psk []byte, listenAddr, serverAddr string) (*UD
 	}, nil
 }
 
-func (c *UDPClient) Run(ctx context.Context) error {
+func (c *UDPRelay) Run(ctx context.Context) error {
 	var errGroup errgroup.Group
 	
 	ctx, cancel := context.WithCancel(ctx)
@@ -165,7 +165,7 @@ func (c *UDPClient) Run(ctx context.Context) error {
 	return errGroup.Wait()
 }
 
-func (c *UDPClient) EncryptPacket(clientAddr net.Addr, data []byte) ([]byte, error) {
+func (c *UDPRelay) EncryptPacket(clientAddr net.Addr, data []byte) ([]byte, error) {
 	session, err := c.getOrCreateClientSession(clientAddr)
 	if err != nil {
 		return nil, err
@@ -188,7 +188,7 @@ func (c *UDPClient) EncryptPacket(clientAddr net.Addr, data []byte) ([]byte, err
 	return append(enSeparateHeader, enBody...), nil
 }
 
-func (c *UDPClient) DecryptPacket(payload []byte) ([]byte, net.Addr, error) {
+func (c *UDPRelay) DecryptPacket(payload []byte) ([]byte, net.Addr, error) {
 	if len(payload) < 16 {
 		return nil, nil, ErrPayloadTooShort
 	}
@@ -223,13 +223,13 @@ func (c *UDPClient) DecryptPacket(payload []byte) ([]byte, net.Addr, error) {
 	return body, v.(net.Addr), nil
 }
 
-func (c *UDPClient) Close() error {
+func (c *UDPRelay) Close() error {
 	c.ClientConn.Close()
 	c.ServerConn.Close()
 	return nil
 }
 
-func (c *UDPClient) getOrCreateClientSession(addr net.Addr) (*UDPSession, error) {
+func (c *UDPRelay) getOrCreateClientSession(addr net.Addr) (*UDPSession, error) {
 	key := addr.String()
 	if v, ok := c.clientSessions.Load(key); ok {
 		return v.(*UDPSession), nil
@@ -249,7 +249,7 @@ func (c *UDPClient) getOrCreateClientSession(addr net.Addr) (*UDPSession, error)
 	return session, nil
 }
 
-func (c *UDPClient) getOrCreateServerCipher(sessionID []byte) (*Cipher, error) {
+func (c *UDPRelay) getOrCreateServerCipher(sessionID []byte) (*Cipher, error) {
 	key := string(sessionID)
 	if v, ok := c.serverCiphers.Load(key); ok {
 		return v.(*Cipher), nil
@@ -264,7 +264,7 @@ func (c *UDPClient) getOrCreateServerCipher(sessionID []byte) (*Cipher, error) {
 	return cipher, nil
 }
 
-func (c *UDPClient) buildMessageHeader() ([]byte, error) {
+func (c *UDPRelay) buildMessageHeader() ([]byte, error) {
 	mh := []byte{0x00} // Type: Client-to-Server
 	
 	timestamp := make([]byte, 8)
@@ -285,7 +285,7 @@ func (c *UDPClient) buildMessageHeader() ([]byte, error) {
 	return append(mh, padding...), nil
 }
 
-func (c *UDPClient) parseMessageBody(deBody []byte) (payload, clientSessionID []byte, err error) {
+func (c *UDPRelay) parseMessageBody(deBody []byte) (payload, clientSessionID []byte, err error) {
 	if len(deBody) < 1 {
 		return nil, nil, ErrPayloadTooShort
 	}

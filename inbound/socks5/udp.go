@@ -2,7 +2,8 @@ package socks5
 
 import (
 	"errors"
-	"kage/core"
+
+	"github.com/aomori446/kage/core"
 )
 
 var (
@@ -44,7 +45,6 @@ func (d Datagram) Payload() []byte {
 	return d[offset:]
 }
 
-
 func PackDatagram(addr *core.Address, payload []byte) []byte {
 	addrBytes := addr.Bytes()
 	buf := make([]byte, 3+len(addrBytes)+len(payload))
@@ -67,4 +67,3 @@ func ParseDatagram(b []byte) (addr *core.Address, payload []byte, err error) {
 	}
 	return addr, d.Payload(), nil
 }
-

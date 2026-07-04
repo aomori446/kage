@@ -3,47 +3,48 @@ package http
 import (
 	"context"
 	"errors"
-	"kage/core"
-	"kage/shadowsocks"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"sync"
 	"time"
+
+	"github.com/aomori446/kage/core"
+	"github.com/aomori446/kage/outbound/shadowsocks"
 )
 
 type Inbound struct {
 	ListenAddr string
 	ServerAddr string
-	Method     string
 
-	Key []byte
+	Method string
+	Key    []byte
 
 	ctx       context.Context
 	proxy     *httputil.ReverseProxy
 	proxyOnce sync.Once
 }
 
-func (p *Inbound) Listen(ctx context.Context) error {
+func (p *Inbound) Run(ctx context.Context) error {
 	p.ctx = ctx
 	ln, err := net.Listen("tcp", p.ListenAddr)
 	if err != nil {
 		return err
 	}
-	
+
 	go func() {
 		<-ctx.Done()
 		ln.Close()
 	}()
-	
+
 	slog.Info("HTTP inbound listening", "addr", p.ListenAddr)
-	
+
 	srv := &http.Server{
 		Addr:    p.ListenAddr,
 		Handler: p,
 	}
-	
+
 	return srv.Serve(ln)
 }
 
@@ -53,9 +54,9 @@ func (p *Inbound) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if method == http.MethodConnect {
 		target = "https://" + target
 	}
-	
+
 	slog.Info("HTTP proxying", "method", method, "target", target, "client", req.RemoteAddr)
-	
+
 	if method == http.MethodConnect {
 		p.handleCONNECT(w, req)
 	} else {
@@ -71,15 +72,15 @@ func (p *Inbound) handleCONNECT(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "Proxy error: invalid target address", http.StatusBadRequest)
 		return
 	}
-	
-	shadowConn, err := p.dialShadowsocks(targetAddr, nil)
+
+	shadowConn, err := shadowsocks.NewConn(p.ServerAddr, p.Method, p.Key, targetAddr, nil)
 	if err != nil {
 		slog.Error("Dial Shadowsocks failed", "error", err)
 		http.Error(w, "Proxy error: connection failed", http.StatusBadGateway)
 		return
 	}
 	defer shadowConn.Close()
-	
+
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		slog.Error("Hijack failed: http.ResponseWriter is not a hijacker")
@@ -92,14 +93,14 @@ func (p *Inbound) handleCONNECT(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer clientConn.Close()
-	
+
 	_, err = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	if err != nil {
 		slog.Error("Send 200 Established failed", "error", err)
 		return
 	}
-	
-	core.TCPRelay(p.ctx, clientConn, shadowConn)
+
+	shadowConn.RelayWith(p.ctx, clientConn)
 }
 
 func (p *Inbound) initProxy() {
@@ -107,7 +108,6 @@ func (p *Inbound) initProxy() {
 		Director: func(outReq *http.Request) {
 			outReq.URL.Scheme = "http"
 			outReq.URL.Host = outReq.Host
-			outReq.RequestURI = ""
 		},
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -115,12 +115,8 @@ func (p *Inbound) initProxy() {
 				if err != nil {
 					return nil, err
 				}
-				shadowConn, err := p.dialShadowsocks(targetAddr, nil)
+				shadowConn, err := shadowsocks.NewConn(p.ServerAddr, p.Method, p.Key, targetAddr, nil)
 				if err != nil {
-					return nil, err
-				}
-				if _, err = shadowConn.Write(nil); err != nil {
-					shadowConn.Close()
 					return nil, err
 				}
 				return shadowConn, nil
@@ -137,13 +133,4 @@ func (p *Inbound) initProxy() {
 			w.WriteHeader(http.StatusBadGateway)
 		},
 	}
-}
-
-func (p *Inbound) dialShadowsocks(targetAddr *core.Address, initialPayload []byte) (*shadowsocks.Conn, error) {
-	serverConn, err := net.DialTimeout("tcp", p.ServerAddr, time.Second*3)
-	if err != nil {
-		return nil, err
-	}
-	
-	return shadowsocks.NewConn(serverConn, p.Method, p.Key, targetAddr, initialPayload)
 }

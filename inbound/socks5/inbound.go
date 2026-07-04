@@ -5,35 +5,35 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"kage/core"
-	"kage/shadowsocks"
 	"log/slog"
 	"net"
 	"syscall"
-	"time"
+
+	"github.com/aomori446/kage/core"
+	"github.com/aomori446/kage/outbound/shadowsocks"
 )
 
-type Client struct {
+type Inbound struct {
 	ListenAddr string
 	ServerAddr string
 	Method     string
 	Key        []byte
 	FastOpen   bool
-	
+
 	UDP bool
 }
 
-func (c *Client) Run(ctx context.Context) error {
+func (c *Inbound) Run(ctx context.Context) error {
 	ln, err := net.Listen("tcp", c.ListenAddr)
 	if err != nil {
 		return fmt.Errorf("listen on %s failed: %w", c.ListenAddr, err)
 	}
-	
+
 	go func() {
 		<-ctx.Done()
 		ln.Close()
 	}()
-	
+
 	for {
 		clientConn, err := ln.Accept()
 		if err != nil {
@@ -44,20 +44,20 @@ func (c *Client) Run(ctx context.Context) error {
 			}
 			return err
 		}
-		
+
 		go c.handleConn(ctx, clientConn)
 	}
 }
 
-func (c *Client) handleConn(ctx context.Context, clientConn net.Conn) {
+func (c *Inbound) handleConn(ctx context.Context, clientConn net.Conn) {
 	defer clientConn.Close()
-	
-	handshakeRes, err := Handshake(clientConn, c.FastOpen)
+
+	handshakeRes, err := Handshake(ctx, clientConn, c.FastOpen)
 	if err != nil {
 		slog.Debug("[SOCKS5] handshake failed", "client", clientConn.RemoteAddr(), "err", err)
 		return
 	}
-	
+
 	if handshakeRes.Command == 0x03 {
 		if !c.UDP {
 			slog.Debug("[SOCKS5] UDP Associate rejected: UDP disabled", "client", clientConn.RemoteAddr())
@@ -68,62 +68,52 @@ func (c *Client) handleConn(ctx context.Context, clientConn net.Conn) {
 		}
 		return
 	}
-	
+
 	if err = c.handleTCP(ctx, clientConn, handshakeRes.TargetAddress, handshakeRes.InitialPayload); err != nil {
 		slog.Debug("[SOCKS5] TCP proxy connection failed", "client", clientConn.RemoteAddr(), "err", err)
 	}
 }
 
-func (c *Client) handleTCP(ctx context.Context, clientConn net.Conn, targetAddr *core.Address, initialPayload []byte) error {
+func (c *Inbound) handleTCP(ctx context.Context, clientConn net.Conn, targetAddr *core.Address, initialPayload []byte) error {
 	if err := SendResponse(clientConn, ""); err != nil {
 		return fmt.Errorf("send response failed: %w", err)
 	}
-	
-	serverConn, err := net.DialTimeout("tcp", c.ServerAddr, time.Second*3)
-	if err != nil {
-		return fmt.Errorf("dial server for %v failed: %w", targetAddr, err)
-	}
-	defer serverConn.Close()
-	
-	shadowConn, err := shadowsocks.NewConn(serverConn, c.Method, c.Key, targetAddr, initialPayload)
+
+	shadowConn, err := shadowsocks.NewConn(c.ServerAddr, c.Method, c.Key, targetAddr, initialPayload)
 	if err != nil {
 		return fmt.Errorf("create shadow connection failed: %w", err)
 	}
 	defer shadowConn.Close()
-	
-	if _, err = shadowConn.Write(nil); err != nil {
-		return fmt.Errorf("send handshake to server header failed: %w", err)
-	}
-	
-	slog.Debug("[SOCKS5] TCP proxy connection established", "client", clientConn.RemoteAddr(), "server", serverConn.RemoteAddr(), "target", targetAddr)
-	err = core.TCPRelay(ctx, clientConn, shadowConn)
-	err = ignoreExpectedErrors(err)
-	if err != nil {
+
+	slog.Debug("[SOCKS5] TCP proxy connection established", "client", clientConn.RemoteAddr(), "server", shadowConn.RemoteAddr(), "target", targetAddr)
+
+	if err = ignoreExpectedErrors(shadowConn.RelayWith(ctx, clientConn)); err != nil {
 		return fmt.Errorf("TCP relay failed: %w", err)
 	}
-	slog.Debug("[SOCKS5] TCP proxy connection disconnected", "client", clientConn.RemoteAddr(), "server", serverConn.RemoteAddr(), "target", targetAddr)
+
+	slog.Debug("[SOCKS5] TCP proxy connection disconnected", "client", clientConn.RemoteAddr(), "server", shadowConn.RemoteAddr(), "target", targetAddr)
 	return nil
 }
 
-func (c *Client) handleUDP(ctx context.Context, clientConn net.Conn) error {
+func (c *Inbound) handleUDP(ctx context.Context, clientConn net.Conn) error {
 	if err := SendResponse(clientConn, c.ListenAddr); err != nil {
 		return fmt.Errorf("send response failed: %w", err)
 	}
-	
-	udpClient, err := shadowsocks.NewUDPClient(c.Method, c.Key, c.ListenAddr, c.ServerAddr)
+
+	udpRelay, err := shadowsocks.NewUDPRelay(c.Method, c.Key, c.ListenAddr, c.ServerAddr)
 	if err != nil {
-		return fmt.Errorf("init UDP client failed: %w", err)
+		return fmt.Errorf("init UDP relay failed: %w", err)
 	}
-	
+
 	udpCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
 		clientConn.Read(make([]byte, 1))
 		cancel()
 	}()
-	
+
 	slog.Debug("[SOCKS5] UDP relay connection established", "client", clientConn.RemoteAddr(), "server", c.ListenAddr)
-	if err = udpClient.Run(udpCtx); err != nil {
+	if err = udpRelay.Run(udpCtx); err != nil {
 		return fmt.Errorf("UDP relay failed: %w", err)
 	}
 	slog.Debug("[SOCKS5] UDP relay connection closed", "client", clientConn.RemoteAddr(), "server", c.ListenAddr)
